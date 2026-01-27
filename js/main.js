@@ -147,19 +147,23 @@ class App {
         document.getElementById('btn-undo').addEventListener('click', () => {
             if (this.game) {
                 this.game.undo();
+                analytics.trackUndoUsed(this.currentPuzzle?.id);
             }
         });
 
         document.getElementById('btn-reset').addEventListener('click', () => {
             if (this.game) {
                 this.game.reset();
+                analytics.trackLevelReset(this.currentPuzzle?.id);
             }
         });
 
         document.getElementById('btn-hint').addEventListener('click', () => {
             if (this.game) {
                 const hintShown = this.game.showHint();
-                if (!hintShown) {
+                if (hintShown) {
+                    analytics.trackHintUsed(this.currentPuzzle?.id, this.game.getHintsUsed());
+                } else {
                     // No solution available from current state
                     alert('No solution available from current state. Try undoing some moves.');
                 }
@@ -249,6 +253,9 @@ class App {
 
         this.screens[screenName].classList.add('active');
         this.currentScreen = screenName;
+
+        // Track screen view
+        analytics.trackScreenView(screenName);
     }
 
     /**
@@ -340,6 +347,9 @@ class App {
         document.getElementById('level-name').textContent = level.name;
         this.updateTapCounter(0);
 
+        // Track level start
+        analytics.trackLevelStart(chapterId, levelIndex, level.id);
+
         // Show screen first so container has dimensions
         this.showScreen('game');
 
@@ -387,6 +397,9 @@ class App {
         this.updateDailyTapCounter(0);
         this.updateDailyStreak();
 
+        // Track daily start
+        analytics.trackDailyStart(dailyPuzzle.getTodayString());
+
         // Show screen first so container has dimensions
         this.showScreen('daily');
 
@@ -426,6 +439,16 @@ class App {
     handleWin(taps, puzzle) {
         storage.completeLevel(puzzle.id, taps);
         storage.clearGameState();
+
+        // Track level complete
+        analytics.trackLevelComplete(
+            this.currentChapterId,
+            this.currentLevelIndex,
+            puzzle.id,
+            taps,
+            this.game.getHintsUsed()
+        );
+
         this.showWinModal(taps, puzzle);
     }
 
@@ -437,6 +460,11 @@ class App {
         storage.updateDailyStatus(today, true, taps);
         storage.addDailyHistory(today, taps);
         this.updateDailyStreak();
+
+        // Track daily complete
+        const status = storage.getDailyStatus();
+        analytics.trackDailyComplete(today, taps, status.streak);
+
         this.showWinModal(taps, puzzle);
     }
 
@@ -508,6 +536,13 @@ class App {
         // Initialize after screen is visible
         requestAnimationFrame(() => {
             this.mechanicsController.init(this.levelManager);
+
+            // Track mechanics view with unlocked mechanics
+            const unlockStatus = this.getMechanicsUnlockStatus();
+            const unlockedList = Object.entries(unlockStatus)
+                .filter(([_, unlocked]) => unlocked)
+                .map(([name]) => name);
+            analytics.trackMechanicsView(unlockedList);
         });
     }
 
@@ -533,6 +568,9 @@ class App {
 
         const game = this.isDailyMode ? this.dailyGame : this.game;
         const taps = game.getTapCount();
+
+        // Track share
+        analytics.trackShare(this.currentPuzzle.id, taps);
 
         if (this.isDailyMode) {
             const result = await dailyPuzzle.shareResult(this.currentPuzzle, taps);

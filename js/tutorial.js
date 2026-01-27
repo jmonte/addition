@@ -59,6 +59,9 @@ class TutorialController {
         this.isActive = true;
         this.setupEventListeners();
         this.renderStep();
+
+        // Track tutorial start
+        analytics.trackTutorialStart();
     }
 
     /**
@@ -282,6 +285,9 @@ class TutorialController {
         if (this.currentStep < this.totalSteps - 1) {
             this.currentStep++;
             this.renderStep();
+
+            // Track step progression
+            analytics.trackTutorialStep(this.currentStep + 1, this.totalSteps);
         } else {
             // Tutorial complete
             this.complete();
@@ -302,13 +308,26 @@ class TutorialController {
      * Skip tutorial
      */
     skip() {
-        this.complete();
+        // Track tutorial skip
+        analytics.trackTutorialSkip(this.currentStep + 1);
+
+        this.completeInternal(false);
     }
 
     /**
      * Complete tutorial
      */
     complete() {
+        // Track tutorial complete
+        analytics.trackTutorialComplete();
+
+        this.completeInternal(true);
+    }
+
+    /**
+     * Internal completion handler
+     */
+    completeInternal(completed) {
         this.isActive = false;
         storage.set('tutorialCompleted', true);
         this.removeEventListeners();
