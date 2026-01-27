@@ -231,7 +231,10 @@ class App {
         const dailyCanvas = document.getElementById('daily-canvas');
 
         this.game = new Game(gameCanvas, {
-            onTap: (taps) => this.updateTapCounter(taps),
+            onTap: (taps) => {
+                this.updateTapCounter(taps);
+                analytics.trackTap(this.currentPuzzle?.id);
+            },
             onWin: (taps, puzzle) => this.handleWin(taps, puzzle),
             onReset: () => this.updateTapCounter(0)
         });
@@ -304,6 +307,9 @@ class App {
         const chapter = this.levelManager.getChapter(chapterId);
         const chapters = this.levelManager.getChapters();
         const completedLevels = storage.getCompletedLevels();
+
+        // Track chapter start
+        analytics.trackChapterStart(chapterId);
 
         document.getElementById('chapter-title').textContent = chapter.name;
 
