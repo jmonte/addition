@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="description" content="Ripple Add - A calming Zen Garden puzzle game">
+    <title>Ripple Add - Zen Garden Puzzle</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/theme-zen.css">
+</head>
+<body>
+    <div id="app">
+        <!-- Main Menu Screen -->
+        <div id="menu-screen" class="screen active">
+            <div class="menu-container">
+                <h1 class="game-title">Ripple Add</h1>
+                <p class="game-subtitle">Zen Garden Puzzles</p>
+                <div class="menu-buttons">
+                    <button id="btn-play" class="menu-btn primary">Play</button>
+                    <button id="btn-daily" class="menu-btn">Daily Puzzle</button>
+                    <button id="btn-chapters" class="menu-btn">Chapters</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Chapter Select Screen -->
+        <div id="chapter-screen" class="screen">
+            <div class="screen-header">
+                <button id="btn-back-menu" class="back-btn">&larr;</button>
+                <h2>Chapters</h2>
+            </div>
+            <div id="chapter-list" class="chapter-list">
+                <!-- Chapters populated by JS -->
+            </div>
+        </div>
+
+        <!-- Level Select Screen -->
+        <div id="level-screen" class="screen">
+            <div class="screen-header">
+                <button id="btn-back-chapters" class="back-btn">&larr;</button>
+                <h2 id="chapter-title">Chapter</h2>
+            </div>
+            <div id="level-grid" class="level-grid">
+                <!-- Levels populated by JS -->
+            </div>
+        </div>
+
+        <!-- Game Screen -->
+        <div id="game-screen" class="screen">
+            <div class="game-header">
+                <button id="btn-back-levels" class="back-btn">&larr;</button>
+                <div class="level-info">
+                    <span id="level-name">Level 1</span>
+                    <span id="tap-counter">Taps: 0</span>
+                </div>
+                <div class="game-controls">
+                    <button id="btn-undo" class="control-btn" title="Undo">↶</button>
+                    <button id="btn-reset" class="control-btn" title="Reset">⟳</button>
+                </div>
+            </div>
+            <div class="game-area">
+                <canvas id="game-canvas"></canvas>
+            </div>
+            <div class="game-footer">
+                <div id="goal-display" class="goal-display">
+                    Make all cells reach their targets
+                </div>
+            </div>
+        </div>
+
+        <!-- Win Modal -->
+        <div id="win-modal" class="modal">
+            <div class="modal-content">
+                <div class="win-animation">
+                    <div class="petals"></div>
+                </div>
+                <h2>Harmony Achieved</h2>
+                <p id="win-stats">Completed in <span id="win-taps">0</span> taps</p>
+                <div class="win-buttons">
+                    <button id="btn-next-level" class="menu-btn primary">Next Level</button>
+                    <button id="btn-share" class="menu-btn">Share</button>
+                    <button id="btn-replay" class="menu-btn">Replay</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Daily Puzzle Screen -->
+        <div id="daily-screen" class="screen">
+            <div class="game-header">
+                <button id="btn-back-daily" class="back-btn">&larr;</button>
+                <div class="level-info">
+                    <span id="daily-title">Daily Puzzle</span>
+                    <span id="daily-tap-counter">Taps: 0</span>
+                </div>
+                <div class="game-controls">
+                    <button id="btn-daily-undo" class="control-btn" title="Undo">↶</button>
+                    <button id="btn-daily-reset" class="control-btn" title="Reset">⟳</button>
+                </div>
+            </div>
+            <div class="game-area">
+                <canvas id="daily-canvas"></canvas>
+            </div>
+            <div class="game-footer">
+                <div id="daily-streak" class="streak-display">
+                    🔥 Streak: <span id="streak-count">0</span> days
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/grid.js"></script>
+    <script src="js/animation.js"></script>
+    <script src="js/renderer.js"></script>
+    <script src="js/game.js"></script>
+    <script src="js/levels.js"></script>
+    <script src="js/storage.js"></script>
+    <script src="js/daily.js"></script>
+    <script src="js/main.js"></script>
+</body>
+</html>

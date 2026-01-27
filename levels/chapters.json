@@ -1,0 +1,664 @@
+{
+  "chapters": [
+    {
+      "id": "chapter-1",
+      "name": "Calm Waters",
+      "description": "Learn the basics of ripple mechanics",
+      "levels": [
+        {
+          "id": "1-1",
+          "name": "First Ripple",
+          "grid": 3,
+          "cells": [
+            { "x": 1, "y": 1, "type": "normal", "target": 1 }
+          ],
+          "solution": [[1, 1]]
+        },
+        {
+          "id": "1-2",
+          "name": "Spreading Out",
+          "grid": 3,
+          "cells": [
+            { "x": 0, "y": 1, "type": "normal", "target": 1 },
+            { "x": 1, "y": 1, "type": "normal", "target": 1 },
+            { "x": 2, "y": 1, "type": "normal", "target": 1 }
+          ],
+          "solution": [[1, 1]]
+        },
+        {
+          "id": "1-3",
+          "name": "Cross Pattern",
+          "grid": 3,
+          "cells": [
+            { "x": 1, "y": 0, "type": "normal", "target": 1 },
+            { "x": 0, "y": 1, "type": "normal", "target": 1 },
+            { "x": 1, "y": 1, "type": "normal", "target": 1 },
+            { "x": 2, "y": 1, "type": "normal", "target": 1 },
+            { "x": 1, "y": 2, "type": "normal", "target": 1 }
+          ],
+          "solution": [[1, 1]]
+        },
+        {
+          "id": "1-4",
+          "name": "One Tap Each",
+          "grid": 3,
+          "cells": [
+            { "x": 0, "y": 1, "type": "normal", "target": 1, "maxTaps": 1 },
+            { "x": 1, "y": 1, "type": "normal", "target": 2, "maxTaps": 0 },
+            { "x": 2, "y": 1, "type": "normal", "target": 1, "maxTaps": 1 }
+          ],
+          "solution": [[0, 1], [2, 1]]
+        },
+        {
+          "id": "1-5",
+          "name": "Corner Stones",
+          "grid": 3,
+          "cells": [
+            { "x": 0, "y": 0, "type": "normal", "target": 1 },
+            { "x": 2, "y": 0, "type": "normal", "target": 1 },
+            { "x": 1, "y": 1, "type": "normal", "target": 2 },
+            { "x": 0, "y": 2, "type": "normal", "target": 1 },
+            { "x": 2, "y": 2, "type": "normal", "target": 1 }
+          ],
+          "solution": [[0, 0], [2, 0], [0, 2], [2, 2]]
+        },
+        {
+          "id": "1-6",
+          "name": "Overlap",
+          "grid": 4,
+          "cells": [
+            { "x": 1, "y": 1, "type": "normal", "target": 2 },
+            { "x": 2, "y": 1, "type": "normal", "target": 2 },
+            { "x": 1, "y": 2, "type": "normal", "target": 2 },
+            { "x": 2, "y": 2, "type": "normal", "target": 2 }
+          ],
+          "solution": [[1, 1], [2, 2]]
+        },
+        {
+          "id": "1-7",
+          "name": "Line Up",
+          "grid": 4,
+          "cells": [
+            { "x": 0, "y": 1, "type": "normal", "target": 1 },
+            { "x": 1, "y": 1, "type": "normal", "target": 2 },
+            { "x": 2, "y": 1, "type": "normal", "target": 2 },
+            { "x": 3, "y": 1, "type": "normal", "target": 1 }
+          ],
+          "solution": [[1, 1], [2, 1]]
+        },
+        {
+          "id": "1-8",
+          "name": "Stacking",
+          "grid": 3,
+          "cells": [
+            { "x": 1, "y": 0, "type": "normal", "target": 2 },
+            { "x": 1, "y": 1, "type": "normal", "target": 3 },
+            { "x": 1, "y": 2, "type": "normal", "target": 2 }
+          ],
+          "solution": [[1, 0], [1, 1], [1, 2]]
+        },
+        {
+          "id": "1-9",
+          "name": "Diamond",
+          "grid": 4,
+          "cells": [
+            { "x": 1, "y": 0, "type": "normal", "target": 1 },
+            { "x": 2, "y": 0, "type": "normal", "target": 1 },
+            { "x": 0, "y": 1, "type": "normal", "target": 1 },
+            { "x": 1, "y": 1, "type": "normal", "target": 2 },
+            { "x": 2, "y": 1, "type": "normal", "target": 2 },
+            { "x": 3, "y": 1, "type": "normal", "target": 1 },
+            { "x": 1, "y": 2, "type": "normal", "target": 1 },
+            { "x": 2, "y": 2, "type": "normal", "target": 1 }
+          ],
+          "solution": [[1, 1], [2, 1]]
+        },
+        {
+          "id": "1-10",
+          "name": "Graduation",
+          "grid": 4,
+          "cells": [
+            { "x": 0, "y": 0, "type": "normal", "target": 1 },
+            { "x": 1, "y": 0, "type": "normal", "target": 2 },
+            { "x": 2, "y": 0, "type": "normal", "target": 2 },
+            { "x": 3, "y": 0, "type": "normal", "target": 1 },
+            { "x": 0, "y": 1, "type": "normal", "target": 2 },
+            { "x": 1, "y": 1, "type": "normal", "target": 3 },
+            { "x": 2, "y": 1, "type": "normal", "target": 3 },
+            { "x": 3, "y": 1, "type": "normal", "target": 2 }
+          ],
+          "solution": [[1, 0], [2, 0], [1, 1], [2, 1]]
+        }
+      ]
+    },
+    {
+      "id": "chapter-2",
+      "name": "Stone Path",
+      "description": "Master the art of blocking",
+      "levels": [
+        {
+          "id": "2-1",
+          "name": "First Block",
+          "grid": 3,
+          "cells": [
+            { "x": 0, "y": 1, "type": "normal", "target": 1 },
+            { "x": 1, "y": 1, "type": "blocker" },
+            { "x": 2, "y": 1, "type": "normal", "target": 1 }
+          ],
+          "solution": [[0, 1], [2, 1]]
+        },
+        {
+          "id": "2-2",
+          "name": "Around the Rock",
+          "grid": 4,
+          "cells": [
+            { "x": 1, "y": 0, "type": "normal", "target": 1 },
+            { "x": 2, "y": 0, "type": "normal", "target": 1 },
+            { "x": 0, "y": 1, "type": "normal", "target": 1 },
+            { "x": 1, "y": 1, "type": "blocker" },
+            { "x": 2, "y": 1, "type": "blocker" },
+            { "x": 3, "y": 1, "type": "normal", "target": 1 },
+            { "x": 1, "y": 2, "type": "normal", "target": 1 },
+            { "x": 2, "y": 2, "type": "normal", "target": 1 }
+          ],
+          "solution": [[1, 0], [2, 0], [0, 1], [3, 1], [1, 2], [2, 2]]
+        },
+        {
+          "id": "2-3",
+          "name": "Blocked Center",
+          "grid": 3,
+          "cells": [
+            { "x": 0, "y": 0, "type": "normal", "target": 1 },
+            { "x": 2, "y": 0, "type": "normal", "target": 1 },
+            { "x": 1, "y": 1, "type": "blocker" },
+            { "x": 0, "y": 2, "type": "normal", "target": 1 },
+            { "x": 2, "y": 2, "type": "normal", "target": 1 }
+          ],
+          "solution": [[0, 0], [2, 0], [0, 2], [2, 2]]
+        },
+        {
+          "id": "2-4",
+          "name": "Wall",
+          "grid": 4,
+          "cells": [
+            { "x": 0, "y": 0, "type": "normal", "target": 1 },
+            { "x": 0, "y": 1, "type": "normal", "target": 2 },
+            { "x": 0, "y": 2, "type": "normal", "target": 1 },
+            { "x": 1, "y": 0, "type": "blocker" },
+            { "x": 1, "y": 1, "type": "blocker" },
+            { "x": 1, "y": 2, "type": "blocker" },
+            { "x": 2, "y": 0, "type": "normal", "target": 1 },
+            { "x": 2, "y": 1, "type": "normal", "target": 2 },
+            { "x": 2, "y": 2, "type": "normal", "target": 1 }
+          ],
+          "solution": [[0, 0], [0, 1], [0, 2], [2, 0], [2, 1], [2, 2]]
+        },
+        {
+          "id": "2-5",
+          "name": "Island",
+          "grid": 4,
+          "cells": [
+            { "x": 1, "y": 1, "type": "blocker" },
+            { "x": 2, "y": 1, "type": "blocker" },
+            { "x": 1, "y": 2, "type": "blocker" },
+            { "x": 2, "y": 2, "type": "blocker" },
+            { "x": 0, "y": 0, "type": "normal", "target": 1 },
+            { "x": 1, "y": 0, "type": "normal", "target": 1 },
+            { "x": 2, "y": 0, "type": "normal", "target": 1 },
+            { "x": 3, "y": 0, "type": "normal", "target": 1 },
+            { "x": 0, "y": 1, "type": "normal", "target": 1 },
+            { "x": 3, "y": 1, "type": "normal", "target": 1 },
+            { "x": 0, "y": 2, "type": "normal", "target": 1 },
+            { "x": 3, "y": 2, "type": "normal", "target": 1 },
+            { "x": 0, "y": 3, "type": "normal", "target": 1 },
+            { "x": 1, "y": 3, "type": "normal", "target": 1 },
+            { "x": 2, "y": 3, "type": "normal", "target": 1 },
+            { "x": 3, "y": 3, "type": "normal", "target": 1 }
+          ],
+          "solution": [[0, 0], [3, 0], [0, 3], [3, 3]]
+        },
+        {
+          "id": "2-6",
+          "name": "Narrow Path",
+          "grid": 5,
+          "cells": [
+            { "x": 2, "y": 0, "type": "normal", "target": 1 },
+            { "x": 2, "y": 1, "type": "normal", "target": 2 },
+            { "x": 2, "y": 2, "type": "normal", "target": 2 },
+            { "x": 2, "y": 3, "type": "normal", "target": 2 },
+            { "x": 2, "y": 4, "type": "normal", "target": 1 },
+            { "x": 1, "y": 0, "type": "blocker" },
+            { "x": 3, "y": 0, "type": "blocker" },
+            { "x": 1, "y": 1, "type": "blocker" },
+            { "x": 3, "y": 1, "type": "blocker" },
+            { "x": 1, "y": 2, "type": "blocker" },
+            { "x": 3, "y": 2, "type": "blocker" },
+            { "x": 1, "y": 3, "type": "blocker" },
+            { "x": 3, "y": 3, "type": "blocker" },
+            { "x": 1, "y": 4, "type": "blocker" },
+            { "x": 3, "y": 4, "type": "blocker" }
+          ],
+          "solution": [[2, 1], [2, 2], [2, 3]]
+        },
+        {
+          "id": "2-7",
+          "name": "Corners",
+          "grid": 4,
+          "cells": [
+            { "x": 0, "y": 0, "type": "normal", "target": 2 },
+            { "x": 3, "y": 0, "type": "normal", "target": 2 },
+            { "x": 0, "y": 3, "type": "normal", "target": 2 },
+            { "x": 3, "y": 3, "type": "normal", "target": 2 },
+            { "x": 1, "y": 1, "type": "blocker" },
+            { "x": 2, "y": 1, "type": "blocker" },
+            { "x": 1, "y": 2, "type": "blocker" },
+            { "x": 2, "y": 2, "type": "blocker" },
+            { "x": 1, "y": 0, "type": "normal", "target": 1 },
+            { "x": 2, "y": 0, "type": "normal", "target": 1 },
+            { "x": 0, "y": 1, "type": "normal", "target": 1 },
+            { "x": 3, "y": 1, "type": "normal", "target": 1 },
+            { "x": 0, "y": 2, "type": "normal", "target": 1 },
+            { "x": 3, "y": 2, "type": "normal", "target": 1 },
+            { "x": 1, "y": 3, "type": "normal", "target": 1 },
+            { "x": 2, "y": 3, "type": "normal", "target": 1 }
+          ],
+          "solution": [[0, 0], [3, 0], [0, 3], [3, 3]]
+        },
+        {
+          "id": "2-8",
+          "name": "Checkerboard",
+          "grid": 4,
+          "cells": [
+            { "x": 0, "y": 0, "type": "blocker" },
+            { "x": 2, "y": 0, "type": "blocker" },
+            { "x": 1, "y": 1, "type": "blocker" },
+            { "x": 3, "y": 1, "type": "blocker" },
+            { "x": 0, "y": 2, "type": "blocker" },
+            { "x": 2, "y": 2, "type": "blocker" },
+            { "x": 1, "y": 3, "type": "blocker" },
+            { "x": 3, "y": 3, "type": "blocker" },
+            { "x": 1, "y": 0, "type": "normal", "target": 1 },
+            { "x": 3, "y": 0, "type": "normal", "target": 1 },
+            { "x": 0, "y": 1, "type": "normal", "target": 1 },
+            { "x": 2, "y": 1, "type": "normal", "target": 1 },
+            { "x": 1, "y": 2, "type": "normal", "target": 1 },
+            { "x": 3, "y": 2, "type": "normal", "target": 1 },
+            { "x": 0, "y": 3, "type": "normal", "target": 1 },
+            { "x": 2, "y": 3, "type": "normal", "target": 1 }
+          ],
+          "solution": [[1, 0], [3, 0], [0, 1], [2, 1], [1, 2], [3, 2], [0, 3], [2, 3]]
+        },
+        {
+          "id": "2-9",
+          "name": "Maze",
+          "grid": 5,
+          "cells": [
+            { "x": 0, "y": 0, "type": "normal", "target": 1 },
+            { "x": 1, "y": 0, "type": "normal", "target": 1 },
+            { "x": 2, "y": 0, "type": "blocker" },
+            { "x": 3, "y": 0, "type": "normal", "target": 1 },
+            { "x": 4, "y": 0, "type": "normal", "target": 1 },
+            { "x": 0, "y": 2, "type": "blocker" },
+            { "x": 1, "y": 2, "type": "normal", "target": 2 },
+            { "x": 2, "y": 2, "type": "normal", "target": 2 },
+            { "x": 3, "y": 2, "type": "normal", "target": 2 },
+            { "x": 4, "y": 2, "type": "blocker" },
+            { "x": 0, "y": 4, "type": "normal", "target": 1 },
+            { "x": 1, "y": 4, "type": "normal", "target": 1 },
+            { "x": 2, "y": 4, "type": "blocker" },
+            { "x": 3, "y": 4, "type": "normal", "target": 1 },
+            { "x": 4, "y": 4, "type": "normal", "target": 1 }
+          ],
+          "solution": [[1, 0], [3, 0], [2, 2], [1, 4], [3, 4]]
+        },
+        {
+          "id": "2-10",
+          "name": "Fortress",
+          "grid": 5,
+          "cells": [
+            { "x": 1, "y": 1, "type": "blocker" },
+            { "x": 2, "y": 1, "type": "blocker" },
+            { "x": 3, "y": 1, "type": "blocker" },
+            { "x": 1, "y": 2, "type": "blocker" },
+            { "x": 2, "y": 2, "type": "normal", "target": 4 },
+            { "x": 3, "y": 2, "type": "blocker" },
+            { "x": 1, "y": 3, "type": "blocker" },
+            { "x": 2, "y": 3, "type": "blocker" },
+            { "x": 3, "y": 3, "type": "blocker" },
+            { "x": 2, "y": 0, "type": "normal", "target": 1 },
+            { "x": 0, "y": 2, "type": "normal", "target": 1 },
+            { "x": 4, "y": 2, "type": "normal", "target": 1 },
+            { "x": 2, "y": 4, "type": "normal", "target": 1 }
+          ],
+          "solution": [[2, 0], [0, 2], [4, 2], [2, 4]]
+        }
+      ]
+    },
+    {
+      "id": "chapter-3",
+      "name": "Spirit Garden",
+      "description": "Discover the power of boosters",
+      "levels": [
+        {
+          "id": "3-1",
+          "name": "First Boost",
+          "grid": 3,
+          "cells": [
+            { "x": 1, "y": 1, "type": "booster", "target": 2 },
+            { "x": 0, "y": 1, "type": "normal", "target": 2 },
+            { "x": 2, "y": 1, "type": "normal", "target": 2 },
+            { "x": 1, "y": 0, "type": "normal", "target": 2 },
+            { "x": 1, "y": 2, "type": "normal", "target": 2 }
+          ],
+          "solution": [[1, 1]]
+        },
+        {
+          "id": "3-2",
+          "name": "Double Power",
+          "grid": 4,
+          "cells": [
+            { "x": 1, "y": 1, "type": "booster", "target": 2 },
+            { "x": 2, "y": 2, "type": "booster", "target": 2 },
+            { "x": 0, "y": 1, "type": "normal", "target": 2 },
+            { "x": 1, "y": 0, "type": "normal", "target": 2 },
+            { "x": 2, "y": 1, "type": "normal", "target": 4 },
+            { "x": 1, "y": 2, "type": "normal", "target": 4 },
+            { "x": 2, "y": 3, "type": "normal", "target": 2 },
+            { "x": 3, "y": 2, "type": "normal", "target": 2 }
+          ],
+          "solution": [[1, 1], [2, 2]]
+        },
+        {
+          "id": "3-3",
+          "name": "Boost Chain",
+          "grid": 5,
+          "cells": [
+            { "x": 0, "y": 2, "type": "booster", "target": 2 },
+            { "x": 2, "y": 2, "type": "booster", "target": 4 },
+            { "x": 4, "y": 2, "type": "booster", "target": 2 },
+            { "x": 1, "y": 2, "type": "normal", "target": 4 },
+            { "x": 3, "y": 2, "type": "normal", "target": 4 }
+          ],
+          "solution": [[0, 2], [2, 2], [4, 2]]
+        },
+        {
+          "id": "3-4",
+          "name": "Mixed Signals",
+          "grid": 4,
+          "cells": [
+            { "x": 1, "y": 1, "type": "booster", "target": 2 },
+            { "x": 2, "y": 1, "type": "normal", "target": 3 },
+            { "x": 1, "y": 2, "type": "normal", "target": 3 },
+            { "x": 2, "y": 2, "type": "booster", "target": 2 },
+            { "x": 0, "y": 1, "type": "normal", "target": 2 },
+            { "x": 3, "y": 2, "type": "normal", "target": 2 }
+          ],
+          "solution": [[1, 1], [2, 2]]
+        },
+        {
+          "id": "3-5",
+          "name": "Blocked Boost",
+          "grid": 4,
+          "cells": [
+            { "x": 1, "y": 1, "type": "booster", "target": 2 },
+            { "x": 2, "y": 1, "type": "blocker" },
+            { "x": 1, "y": 2, "type": "blocker" },
+            { "x": 0, "y": 1, "type": "normal", "target": 2 },
+            { "x": 1, "y": 0, "type": "normal", "target": 2 },
+            { "x": 3, "y": 1, "type": "normal", "target": 1 },
+            { "x": 1, "y": 3, "type": "normal", "target": 1 }
+          ],
+          "solution": [[1, 1], [3, 1], [1, 3]]
+        },
+        {
+          "id": "3-6",
+          "name": "Power Grid",
+          "grid": 5,
+          "cells": [
+            { "x": 0, "y": 0, "type": "booster", "target": 2 },
+            { "x": 4, "y": 0, "type": "booster", "target": 2 },
+            { "x": 0, "y": 4, "type": "booster", "target": 2 },
+            { "x": 4, "y": 4, "type": "booster", "target": 2 },
+            { "x": 2, "y": 2, "type": "normal", "target": 4 },
+            { "x": 1, "y": 0, "type": "normal", "target": 2 },
+            { "x": 0, "y": 1, "type": "normal", "target": 2 },
+            { "x": 3, "y": 0, "type": "normal", "target": 2 },
+            { "x": 4, "y": 1, "type": "normal", "target": 2 },
+            { "x": 0, "y": 3, "type": "normal", "target": 2 },
+            { "x": 1, "y": 4, "type": "normal", "target": 2 },
+            { "x": 4, "y": 3, "type": "normal", "target": 2 },
+            { "x": 3, "y": 4, "type": "normal", "target": 2 }
+          ],
+          "solution": [[0, 0], [4, 0], [0, 4], [4, 4], [2, 2], [2, 2]]
+        },
+        {
+          "id": "3-7",
+          "name": "Strategic Boost",
+          "grid": 4,
+          "cells": [
+            { "x": 0, "y": 0, "type": "normal", "target": 2 },
+            { "x": 1, "y": 0, "type": "normal", "target": 3 },
+            { "x": 2, "y": 0, "type": "normal", "target": 3 },
+            { "x": 3, "y": 0, "type": "normal", "target": 2 },
+            { "x": 0, "y": 1, "type": "normal", "target": 3 },
+            { "x": 1, "y": 1, "type": "booster", "target": 4 },
+            { "x": 2, "y": 1, "type": "booster", "target": 4 },
+            { "x": 3, "y": 1, "type": "normal", "target": 3 }
+          ],
+          "solution": [[1, 1], [2, 1]]
+        },
+        {
+          "id": "3-8",
+          "name": "Booster Maze",
+          "grid": 5,
+          "cells": [
+            { "x": 0, "y": 0, "type": "booster", "target": 2 },
+            { "x": 2, "y": 0, "type": "blocker" },
+            { "x": 4, "y": 0, "type": "booster", "target": 2 },
+            { "x": 1, "y": 0, "type": "normal", "target": 2 },
+            { "x": 3, "y": 0, "type": "normal", "target": 2 },
+            { "x": 0, "y": 1, "type": "normal", "target": 2 },
+            { "x": 4, "y": 1, "type": "normal", "target": 2 },
+            { "x": 0, "y": 2, "type": "blocker" },
+            { "x": 2, "y": 2, "type": "normal", "target": 2 },
+            { "x": 4, "y": 2, "type": "blocker" }
+          ],
+          "solution": [[0, 0], [4, 0], [2, 2], [2, 2]]
+        },
+        {
+          "id": "3-9",
+          "name": "Power Balance",
+          "grid": 5,
+          "cells": [
+            { "x": 2, "y": 0, "type": "normal", "target": 2 },
+            { "x": 1, "y": 1, "type": "normal", "target": 2 },
+            { "x": 2, "y": 1, "type": "booster", "target": 4 },
+            { "x": 3, "y": 1, "type": "normal", "target": 2 },
+            { "x": 0, "y": 2, "type": "normal", "target": 2 },
+            { "x": 1, "y": 2, "type": "booster", "target": 4 },
+            { "x": 2, "y": 2, "type": "normal", "target": 6 },
+            { "x": 3, "y": 2, "type": "booster", "target": 4 },
+            { "x": 4, "y": 2, "type": "normal", "target": 2 },
+            { "x": 1, "y": 3, "type": "normal", "target": 2 },
+            { "x": 2, "y": 3, "type": "booster", "target": 4 },
+            { "x": 3, "y": 3, "type": "normal", "target": 2 },
+            { "x": 2, "y": 4, "type": "normal", "target": 2 }
+          ],
+          "solution": [[2, 1], [1, 2], [3, 2], [2, 3]]
+        },
+        {
+          "id": "3-10",
+          "name": "Ultimate Test",
+          "grid": 5,
+          "cells": [
+            { "x": 0, "y": 0, "type": "normal", "target": 2 },
+            { "x": 1, "y": 0, "type": "normal", "target": 3 },
+            { "x": 2, "y": 0, "type": "blocker" },
+            { "x": 3, "y": 0, "type": "normal", "target": 3 },
+            { "x": 4, "y": 0, "type": "normal", "target": 2 },
+            { "x": 0, "y": 1, "type": "normal", "target": 3 },
+            { "x": 1, "y": 1, "type": "booster", "target": 4 },
+            { "x": 3, "y": 1, "type": "booster", "target": 4 },
+            { "x": 4, "y": 1, "type": "normal", "target": 3 },
+            { "x": 0, "y": 2, "type": "blocker" },
+            { "x": 2, "y": 2, "type": "normal", "target": 4 },
+            { "x": 4, "y": 2, "type": "blocker" },
+            { "x": 0, "y": 3, "type": "normal", "target": 3 },
+            { "x": 1, "y": 3, "type": "booster", "target": 4 },
+            { "x": 3, "y": 3, "type": "booster", "target": 4 },
+            { "x": 4, "y": 3, "type": "normal", "target": 3 },
+            { "x": 0, "y": 4, "type": "normal", "target": 2 },
+            { "x": 1, "y": 4, "type": "normal", "target": 3 },
+            { "x": 2, "y": 4, "type": "blocker" },
+            { "x": 3, "y": 4, "type": "normal", "target": 3 },
+            { "x": 4, "y": 4, "type": "normal", "target": 2 }
+          ],
+          "solution": [[1, 1], [3, 1], [1, 3], [3, 3]]
+        }
+      ]
+    },
+    {
+      "id": "chapter-4",
+      "name": "Master's Challenge",
+      "description": "Prove your mastery",
+      "levels": [
+        {
+          "id": "4-1",
+          "name": "Complex Grid",
+          "grid": 6,
+          "cells": [
+            { "x": 0, "y": 0, "type": "normal", "target": 1 },
+            { "x": 2, "y": 0, "type": "normal", "target": 2 },
+            { "x": 3, "y": 0, "type": "normal", "target": 2 },
+            { "x": 5, "y": 0, "type": "normal", "target": 1 },
+            { "x": 0, "y": 2, "type": "normal", "target": 2 },
+            { "x": 2, "y": 2, "type": "booster", "target": 4 },
+            { "x": 3, "y": 2, "type": "booster", "target": 4 },
+            { "x": 5, "y": 2, "type": "normal", "target": 2 },
+            { "x": 0, "y": 3, "type": "normal", "target": 2 },
+            { "x": 2, "y": 3, "type": "booster", "target": 4 },
+            { "x": 3, "y": 3, "type": "booster", "target": 4 },
+            { "x": 5, "y": 3, "type": "normal", "target": 2 },
+            { "x": 0, "y": 5, "type": "normal", "target": 1 },
+            { "x": 2, "y": 5, "type": "normal", "target": 2 },
+            { "x": 3, "y": 5, "type": "normal", "target": 2 },
+            { "x": 5, "y": 5, "type": "normal", "target": 1 },
+            { "x": 1, "y": 1, "type": "blocker" },
+            { "x": 4, "y": 1, "type": "blocker" },
+            { "x": 1, "y": 4, "type": "blocker" },
+            { "x": 4, "y": 4, "type": "blocker" }
+          ],
+          "solution": [[2, 2], [3, 2], [2, 3], [3, 3]]
+        },
+        {
+          "id": "4-2",
+          "name": "Precision",
+          "grid": 6,
+          "cells": [
+            { "x": 2, "y": 0, "type": "normal", "target": 1 },
+            { "x": 3, "y": 0, "type": "normal", "target": 1 },
+            { "x": 0, "y": 2, "type": "normal", "target": 1 },
+            { "x": 1, "y": 2, "type": "normal", "target": 2 },
+            { "x": 2, "y": 2, "type": "normal", "target": 3 },
+            { "x": 3, "y": 2, "type": "normal", "target": 3 },
+            { "x": 4, "y": 2, "type": "normal", "target": 2 },
+            { "x": 5, "y": 2, "type": "normal", "target": 1 },
+            { "x": 0, "y": 3, "type": "normal", "target": 1 },
+            { "x": 1, "y": 3, "type": "normal", "target": 2 },
+            { "x": 2, "y": 3, "type": "normal", "target": 3 },
+            { "x": 3, "y": 3, "type": "normal", "target": 3 },
+            { "x": 4, "y": 3, "type": "normal", "target": 2 },
+            { "x": 5, "y": 3, "type": "normal", "target": 1 },
+            { "x": 2, "y": 5, "type": "normal", "target": 1 },
+            { "x": 3, "y": 5, "type": "normal", "target": 1 }
+          ],
+          "solution": [[2, 2], [3, 2], [2, 3], [3, 3]]
+        },
+        {
+          "id": "4-3",
+          "name": "Scattered",
+          "grid": 6,
+          "cells": [
+            { "x": 0, "y": 0, "type": "booster", "target": 2 },
+            { "x": 5, "y": 0, "type": "booster", "target": 2 },
+            { "x": 0, "y": 5, "type": "booster", "target": 2 },
+            { "x": 5, "y": 5, "type": "booster", "target": 2 },
+            { "x": 1, "y": 0, "type": "normal", "target": 2 },
+            { "x": 4, "y": 0, "type": "normal", "target": 2 },
+            { "x": 0, "y": 1, "type": "normal", "target": 2 },
+            { "x": 5, "y": 1, "type": "normal", "target": 2 },
+            { "x": 0, "y": 4, "type": "normal", "target": 2 },
+            { "x": 5, "y": 4, "type": "normal", "target": 2 },
+            { "x": 1, "y": 5, "type": "normal", "target": 2 },
+            { "x": 4, "y": 5, "type": "normal", "target": 2 },
+            { "x": 2, "y": 2, "type": "blocker" },
+            { "x": 3, "y": 2, "type": "blocker" },
+            { "x": 2, "y": 3, "type": "blocker" },
+            { "x": 3, "y": 3, "type": "blocker" }
+          ],
+          "solution": [[0, 0], [5, 0], [0, 5], [5, 5]]
+        },
+        {
+          "id": "4-4",
+          "name": "Rings",
+          "grid": 7,
+          "cells": [
+            { "x": 3, "y": 0, "type": "normal", "target": 1 },
+            { "x": 2, "y": 1, "type": "normal", "target": 1 },
+            { "x": 3, "y": 1, "type": "normal", "target": 2 },
+            { "x": 4, "y": 1, "type": "normal", "target": 1 },
+            { "x": 1, "y": 2, "type": "normal", "target": 1 },
+            { "x": 2, "y": 2, "type": "normal", "target": 2 },
+            { "x": 3, "y": 2, "type": "blocker" },
+            { "x": 4, "y": 2, "type": "normal", "target": 2 },
+            { "x": 5, "y": 2, "type": "normal", "target": 1 },
+            { "x": 0, "y": 3, "type": "normal", "target": 1 },
+            { "x": 1, "y": 3, "type": "normal", "target": 2 },
+            { "x": 2, "y": 3, "type": "blocker" },
+            { "x": 3, "y": 3, "type": "normal", "target": 4 },
+            { "x": 4, "y": 3, "type": "blocker" },
+            { "x": 5, "y": 3, "type": "normal", "target": 2 },
+            { "x": 6, "y": 3, "type": "normal", "target": 1 },
+            { "x": 1, "y": 4, "type": "normal", "target": 1 },
+            { "x": 2, "y": 4, "type": "normal", "target": 2 },
+            { "x": 3, "y": 4, "type": "blocker" },
+            { "x": 4, "y": 4, "type": "normal", "target": 2 },
+            { "x": 5, "y": 4, "type": "normal", "target": 1 },
+            { "x": 2, "y": 5, "type": "normal", "target": 1 },
+            { "x": 3, "y": 5, "type": "normal", "target": 2 },
+            { "x": 4, "y": 5, "type": "normal", "target": 1 },
+            { "x": 3, "y": 6, "type": "normal", "target": 1 }
+          ],
+          "solution": [[3, 1], [1, 3], [3, 3], [5, 3], [3, 5]]
+        },
+        {
+          "id": "4-5",
+          "name": "Final Challenge",
+          "grid": 7,
+          "cells": [
+            { "x": 0, "y": 0, "type": "booster", "target": 2 },
+            { "x": 3, "y": 0, "type": "blocker" },
+            { "x": 6, "y": 0, "type": "booster", "target": 2 },
+            { "x": 1, "y": 0, "type": "normal", "target": 2 },
+            { "x": 5, "y": 0, "type": "normal", "target": 2 },
+            { "x": 0, "y": 1, "type": "normal", "target": 2 },
+            { "x": 6, "y": 1, "type": "normal", "target": 2 },
+            { "x": 0, "y": 3, "type": "blocker" },
+            { "x": 2, "y": 3, "type": "normal", "target": 2 },
+            { "x": 3, "y": 3, "type": "booster", "target": 4 },
+            { "x": 4, "y": 3, "type": "normal", "target": 2 },
+            { "x": 6, "y": 3, "type": "blocker" },
+            { "x": 0, "y": 5, "type": "normal", "target": 2 },
+            { "x": 6, "y": 5, "type": "normal", "target": 2 },
+            { "x": 0, "y": 6, "type": "booster", "target": 2 },
+            { "x": 1, "y": 6, "type": "normal", "target": 2 },
+            { "x": 3, "y": 6, "type": "blocker" },
+            { "x": 5, "y": 6, "type": "normal", "target": 2 },
+            { "x": 6, "y": 6, "type": "booster", "target": 2 }
+          ],
+          "solution": [[0, 0], [6, 0], [3, 3], [0, 6], [6, 6]]
+        }
+      ]
+    }
+  ]
+}
