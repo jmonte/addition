@@ -19,6 +19,8 @@
                     <button id="btn-play" class="menu-btn primary">Play</button>
                     <button id="btn-daily" class="menu-btn">Daily Puzzle</button>
                     <button id="btn-chapters" class="menu-btn">Chapters</button>
+                    <button id="btn-tutorial" class="menu-btn">Tutorial</button>
+                    <button id="btn-mechanics" class="menu-btn">Mechanics</button>
                 </div>
             </div>
         </div>
@@ -108,6 +110,46 @@
                 </div>
             </div>
         </div>
+
+        <!-- Tutorial Screen -->
+        <div id="tutorial-screen" class="screen">
+            <div class="screen-header">
+                <button id="btn-back-tutorial" class="back-btn">&larr;</button>
+                <h2>Tutorial</h2>
+            </div>
+            <div class="tutorial-container">
+                <div class="tutorial-progress">
+                    <div class="tutorial-step-dots"></div>
+                    <span class="tutorial-step-counter">Step 1 of 6</span>
+                </div>
+                <div class="tutorial-content">
+                    <div class="tutorial-text">
+                        <h3 id="tutorial-title"></h3>
+                        <p id="tutorial-description"></p>
+                    </div>
+                    <div class="tutorial-game-area">
+                        <canvas id="tutorial-canvas"></canvas>
+                    </div>
+                    <div id="tutorial-instruction" class="tutorial-instruction"></div>
+                </div>
+                <div class="tutorial-nav">
+                    <button id="btn-tutorial-prev" class="menu-btn" disabled>Previous</button>
+                    <button id="btn-tutorial-next" class="menu-btn primary">Next</button>
+                    <button id="btn-tutorial-skip" class="menu-btn">Skip</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Mechanics Screen -->
+        <div id="mechanics-screen" class="screen">
+            <div class="screen-header">
+                <button id="btn-back-mechanics" class="back-btn">&larr;</button>
+                <h2>Mechanics</h2>
+            </div>
+            <div class="mechanics-container">
+                <!-- Mechanic cards populated by JS -->
+            </div>
+        </div>
     </div>
 
     <script src="js/grid.js"></script>
@@ -119,6 +161,8 @@
     <script src="js/solver.js"></script>
     <script src="js/difficulty.js"></script>
     <script src="js/daily.js"></script>
+    <script src="js/tutorial.js"></script>
+    <script src="js/mechanics.js"></script>
     <script src="js/main.js"></script>
 </body>
 </html>

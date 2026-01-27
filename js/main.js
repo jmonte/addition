@@ -21,8 +21,14 @@ class App {
             chapter: document.getElementById('chapter-screen'),
             level: document.getElementById('level-screen'),
             game: document.getElementById('game-screen'),
-            daily: document.getElementById('daily-screen')
+            daily: document.getElementById('daily-screen'),
+            tutorial: document.getElementById('tutorial-screen'),
+            mechanics: document.getElementById('mechanics-screen')
         };
+
+        // Controllers
+        this.tutorialController = null;
+        this.mechanicsController = null;
 
         this.winModal = document.getElementById('win-modal');
 
@@ -53,8 +59,12 @@ class App {
         // Update daily streak display
         this.updateDailyStreak();
 
-        // Show menu
-        this.showScreen('menu');
+        // Show tutorial on first open, otherwise show menu
+        if (!TutorialController.hasCompleted()) {
+            this.startTutorial();
+        } else {
+            this.showScreen('menu');
+        }
     }
 
     /**
@@ -74,6 +84,14 @@ class App {
             this.showChapterSelect();
         });
 
+        document.getElementById('btn-tutorial').addEventListener('click', () => {
+            this.startTutorial();
+        });
+
+        document.getElementById('btn-mechanics').addEventListener('click', () => {
+            this.showMechanics();
+        });
+
         // Back buttons
         document.getElementById('btn-back-menu').addEventListener('click', () => {
             this.showScreen('menu');
@@ -89,6 +107,40 @@ class App {
 
         document.getElementById('btn-back-daily').addEventListener('click', () => {
             this.showScreen('menu');
+        });
+
+        document.getElementById('btn-back-tutorial').addEventListener('click', () => {
+            if (this.tutorialController) {
+                this.tutorialController.destroy();
+                this.tutorialController = null;
+            }
+            this.showScreen('menu');
+        });
+
+        document.getElementById('btn-back-mechanics').addEventListener('click', () => {
+            if (this.mechanicsController) {
+                this.mechanicsController.cleanup();
+            }
+            this.showScreen('menu');
+        });
+
+        // Tutorial navigation
+        document.getElementById('btn-tutorial-prev').addEventListener('click', () => {
+            if (this.tutorialController) {
+                this.tutorialController.prevStep();
+            }
+        });
+
+        document.getElementById('btn-tutorial-next').addEventListener('click', () => {
+            if (this.tutorialController) {
+                this.tutorialController.nextStep();
+            }
+        });
+
+        document.getElementById('btn-tutorial-skip').addEventListener('click', () => {
+            if (this.tutorialController) {
+                this.tutorialController.skip();
+            }
         });
 
         // Game controls
@@ -421,6 +473,56 @@ class App {
      */
     closeWinModal() {
         this.winModal.classList.remove('active');
+    }
+
+    /**
+     * Start the tutorial
+     */
+    startTutorial() {
+        this.tutorialController = new TutorialController();
+        this.showScreen('tutorial');
+
+        // Initialize after screen is visible
+        requestAnimationFrame(() => {
+            this.tutorialController.init();
+        });
+    }
+
+    /**
+     * Called when tutorial is completed
+     */
+    onTutorialComplete() {
+        this.tutorialController = null;
+        this.startNextLevel();
+    }
+
+    /**
+     * Show the mechanics page
+     */
+    showMechanics() {
+        if (!this.mechanicsController) {
+            this.mechanicsController = new MechanicsController();
+        }
+        this.showScreen('mechanics');
+
+        // Initialize after screen is visible
+        requestAnimationFrame(() => {
+            this.mechanicsController.init(this.levelManager);
+        });
+    }
+
+    /**
+     * Get unlock status for game mechanics
+     */
+    getMechanicsUnlockStatus() {
+        const chapters = this.levelManager.getChapters();
+        return {
+            basic: true,
+            blocker: storage.isChapterUnlocked('chapter-2', chapters),
+            booster: storage.isChapterUnlocked('chapter-3', chapters),
+            tapLimit: storage.isChapterUnlocked('chapter-4', chapters),
+            winCondition: true
+        };
     }
 
     /**

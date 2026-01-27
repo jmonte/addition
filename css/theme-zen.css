@@ -263,3 +263,64 @@ button:focus {
     background: var(--water-blue-light);
     color: var(--stone-dark);
 }
+
+/* Tutorial Screen */
+#tutorial-screen {
+    background: var(--sand);
+}
+
+.tutorial-step-dot {
+    background: var(--sand-dark);
+}
+
+.tutorial-step-dot.active {
+    background: var(--stone-moss);
+}
+
+.tutorial-step-dot.completed {
+    background: var(--water-blue);
+}
+
+.tutorial-text h3 {
+    color: var(--stone-dark);
+}
+
+.tutorial-text p {
+    color: var(--text-secondary);
+}
+
+#tutorial-canvas {
+    box-shadow: 0 4px 16px var(--shadow-soft);
+}
+
+.tutorial-instruction {
+    background: var(--sand-light);
+    color: var(--stone-dark);
+    box-shadow: 0 2px 8px var(--shadow-soft);
+}
+
+/* Mechanics Screen */
+#mechanics-screen {
+    background: var(--sand);
+}
+
+.mechanic-card {
+    background: var(--sand-light);
+    box-shadow: 0 4px 12px var(--shadow-soft);
+}
+
+.mechanic-card-demo canvas {
+    box-shadow: 0 2px 8px var(--shadow-soft);
+}
+
+.mechanic-card-header h3 {
+    color: var(--stone-dark);
+}
+
+.mechanic-card-content p {
+    color: var(--text-secondary);
+}
+
+.mechanic-lock-info {
+    color: var(--gold-glow);
+}
