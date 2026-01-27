@@ -39,6 +39,7 @@ class Renderer {
         this.completedRows = new Set();
         this.completedCols = new Set();
         this.winAnimation = null;
+        this.hintAnimation = null;
 
         // Bind the render loop
         this.boundRenderLoop = this.renderLoop.bind(this);
@@ -118,7 +119,7 @@ class Renderer {
 
         this.render();
 
-        if (this.animationManager.hasAnimations() || this.ripples.length > 0 || this.floatingTexts.length > 0 || this.winAnimation) {
+        if (this.animationManager.hasAnimations() || this.ripples.length > 0 || this.floatingTexts.length > 0 || this.winAnimation || this.hintAnimation) {
             requestAnimationFrame(this.boundRenderLoop);
         } else {
             setTimeout(() => requestAnimationFrame(this.boundRenderLoop), 100);
@@ -143,6 +144,9 @@ class Renderer {
 
         // Draw row targets (right)
         this.drawRowTargets();
+
+        // Draw hint (before cells so it appears behind)
+        this.drawHint();
 
         // Draw cells
         for (let y = 0; y < this.grid.size; y++) {
@@ -513,6 +517,39 @@ class Renderer {
     }
 
     /**
+     * Show hint animation on a cell
+     */
+    showHint(cellX, cellY) {
+        // Clear any existing hint
+        this.clearHint();
+
+        const x = this.getGridStartX() + cellX * this.cellSize + this.cellSize / 2;
+        const y = this.getGridStartY() + cellY * this.cellSize + this.cellSize / 2;
+
+        this.hintAnimation = new HintPulseAnimation(x, y, this.cellSize, () => {});
+        this.animationManager.add(this.hintAnimation);
+    }
+
+    /**
+     * Clear hint animation
+     */
+    clearHint() {
+        if (this.hintAnimation) {
+            this.hintAnimation.stop();
+            this.hintAnimation = null;
+        }
+    }
+
+    /**
+     * Draw hint animation
+     */
+    drawHint() {
+        if (this.hintAnimation && !this.hintAnimation.isComplete()) {
+            this.hintAnimation.draw(this.ctx);
+        }
+    }
+
+    /**
      * Reset visual state
      */
     reset() {
@@ -522,6 +559,7 @@ class Renderer {
         this.ripples = [];
         this.floatingTexts = [];
         this.winAnimation = null;
+        this.clearHint();
         this.animationManager.clear();
     }
 

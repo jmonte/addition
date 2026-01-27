@@ -314,6 +314,73 @@ class FloatingPlusAnimation extends Animation {
     }
 }
 
+/**
+ * Hint Pulse Animation - pulsing highlight on suggested cell
+ */
+class HintPulseAnimation extends Animation {
+    constructor(x, y, cellSize, onUpdate) {
+        super(1500); // 1.5 second pulse cycle
+        this.x = x;
+        this.y = y;
+        this.cellSize = cellSize;
+        this.pulseScale = 1;
+        this.pulseOpacity = 0.6;
+        this.customOnUpdate = onUpdate;
+        this.looping = true; // Hint animation loops until cleared
+    }
+
+    update(deltaTime) {
+        this.elapsed += deltaTime;
+        const cycleProgress = (this.elapsed % this.duration) / this.duration;
+
+        // Smooth pulse effect using sine wave
+        this.pulseScale = 1 + Math.sin(cycleProgress * Math.PI * 2) * 0.15;
+        this.pulseOpacity = 0.4 + Math.sin(cycleProgress * Math.PI * 2) * 0.3;
+
+        if (this.customOnUpdate) {
+            this.customOnUpdate();
+        }
+    }
+
+    isComplete() {
+        // Hint animation only completes when explicitly stopped
+        return !this.looping;
+    }
+
+    stop() {
+        this.looping = false;
+    }
+
+    draw(ctx) {
+        const radius = this.cellSize * 0.45 * this.pulseScale;
+
+        ctx.save();
+
+        // Draw outer glow
+        const gradient = ctx.createRadialGradient(
+            this.x, this.y, radius * 0.5,
+            this.x, this.y, radius * 1.5
+        );
+        gradient.addColorStop(0, `rgba(126, 184, 201, ${this.pulseOpacity})`);
+        gradient.addColorStop(0.5, `rgba(126, 184, 201, ${this.pulseOpacity * 0.5})`);
+        gradient.addColorStop(1, 'rgba(126, 184, 201, 0)');
+
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, radius * 1.5, 0, Math.PI * 2);
+        ctx.fillStyle = gradient;
+        ctx.fill();
+
+        // Draw pulsing ring
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, radius, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(126, 184, 201, ${this.pulseOpacity + 0.2})`;
+        ctx.lineWidth = 3;
+        ctx.stroke();
+
+        ctx.restore();
+    }
+}
+
 // Export for use in other modules
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
@@ -323,6 +390,7 @@ if (typeof module !== 'undefined' && module.exports) {
         NumberPopAnimation,
         TargetCompleteAnimation,
         WinCelebrationAnimation,
-        FloatingPlusAnimation
+        FloatingPlusAnimation,
+        HintPulseAnimation
     };
 }

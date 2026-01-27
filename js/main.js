@@ -104,6 +104,16 @@ class App {
             }
         });
 
+        document.getElementById('btn-hint').addEventListener('click', () => {
+            if (this.game) {
+                const hintShown = this.game.showHint();
+                if (!hintShown) {
+                    // No solution available from current state
+                    alert('No solution available from current state. Try undoing some moves.');
+                }
+            }
+        });
+
         // Daily game controls
         document.getElementById('btn-daily-undo').addEventListener('click', () => {
             if (this.dailyGame) {
@@ -114,6 +124,16 @@ class App {
         document.getElementById('btn-daily-reset').addEventListener('click', () => {
             if (this.dailyGame) {
                 this.dailyGame.reset();
+            }
+        });
+
+        document.getElementById('btn-daily-hint').addEventListener('click', () => {
+            if (this.dailyGame) {
+                const hintShown = this.dailyGame.showHint();
+                if (!hintShown) {
+                    // No solution available from current state
+                    alert('No solution available from current state. Try undoing some moves.');
+                }
             }
         });
 

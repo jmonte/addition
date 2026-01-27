@@ -67,7 +67,33 @@ class DailyPuzzleManager {
         }
 
         // Generate puzzle with guaranteed solution
-        const puzzle = this.generateSolvablePuzzle(gridSize, random, puzzleNumber);
+        let puzzle = this.generateSolvablePuzzle(gridSize, random, puzzleNumber);
+
+        // Validate with solver if available (and retry if needed)
+        if (typeof puzzleSolver !== 'undefined') {
+            let attempts = 0;
+            const maxAttempts = 5;
+            while (attempts < maxAttempts) {
+                const fullPuzzle = {
+                    grid: puzzle.grid,
+                    rowTargets: puzzle.rowTargets,
+                    colTargets: puzzle.colTargets,
+                    cells: puzzle.cells
+                };
+                const result = puzzleSolver.solve(fullPuzzle);
+                if (result.solvable) {
+                    // Use solver's solution if it found a shorter one
+                    if (result.solution.length < puzzle.solution.length) {
+                        puzzle.solution = result.solution;
+                    }
+                    break;
+                }
+                // Regenerate with different seed offset
+                currentSeed += 1000;
+                puzzle = this.generateSolvablePuzzle(gridSize, random, puzzleNumber);
+                attempts++;
+            }
+        }
 
         return {
             id: `daily-${dateString}`,
@@ -180,25 +206,45 @@ class DailyPuzzleManager {
             }
         }
 
-        // Set target values based on simulation
-        for (const cell of cells) {
-            if (cell.type !== 'blocker') {
-                cell.target = cell.value;
+        // Calculate row and column targets from simulated values
+        const rowTargets = [];
+        const colTargets = [];
+
+        for (let y = 0; y < gridSize; y++) {
+            let rowSum = 0;
+            for (let x = 0; x < gridSize; x++) {
+                const cell = cells.find(c => c.x === x && c.y === y);
+                if (cell && cell.type !== 'blocker') {
+                    rowSum += cell.value;
+                }
             }
+            rowTargets.push(rowSum);
         }
 
-        // Filter to only include cells with targets or special types
+        for (let x = 0; x < gridSize; x++) {
+            let colSum = 0;
+            for (let y = 0; y < gridSize; y++) {
+                const cell = cells.find(c => c.x === x && c.y === y);
+                if (cell && cell.type !== 'blocker') {
+                    colSum += cell.value;
+                }
+            }
+            colTargets.push(colSum);
+        }
+
+        // Filter to only include cells with special types (blockers/boosters)
         const puzzleCells = cells
-            .filter(c => c.type === 'blocker' || c.target > 0)
+            .filter(c => c.type === 'blocker' || c.type === 'booster')
             .map(c => ({
                 x: c.x,
                 y: c.y,
-                type: c.type,
-                target: c.type === 'blocker' ? undefined : c.target
+                type: c.type
             }));
 
         return {
             grid: gridSize,
+            rowTargets,
+            colTargets,
             cells: puzzleCells,
             solution
         };

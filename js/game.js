@@ -13,6 +13,8 @@ class Game {
         this.history = []; // For undo functionality
         this.isComplete = false;
         this.isPlaying = false;
+        this.hintsUsed = 0;
+        this.currentHint = null;
 
         // Callbacks
         this.onTap = options.onTap || null;
@@ -90,6 +92,9 @@ class Game {
         const cell = this.grid.getCell(x, y);
         if (!cell || !cell.canTap()) return;
 
+        // Clear any displayed hint
+        this.clearHint();
+
         // Save state for undo (values and tap counts)
         this.history.push({
             values: this.grid.getValues(),
@@ -143,6 +148,9 @@ class Game {
     undo() {
         if (this.history.length === 0 || this.isComplete) return false;
 
+        // Clear any displayed hint
+        this.clearHint();
+
         const previousState = this.history.pop();
         this.grid.setValues(previousState.values);
         this.grid.setTapCounts(previousState.tapCounts);
@@ -163,6 +171,8 @@ class Game {
         this.taps = [];
         this.history = [];
         this.isComplete = false;
+        this.hintsUsed = 0;
+        this.currentHint = null;
         this.renderer.reset();
 
         if (this.onReset) {
@@ -252,6 +262,104 @@ class Game {
         if (taps > 5) stones += '...';
 
         return `Ripple Add #${puzzleNumber} ${stones} ${taps} tap${taps !== 1 ? 's' : ''}${isOptimal ? ' \u{2728}' : ''}\n\nPlay at: [URL]`;
+    }
+
+    /**
+     * Get a hint for the next optimal tap
+     * Uses the solver to find a solution from current state
+     * @returns {Array|null} [x, y] of suggested tap, or null if no solution
+     */
+    getHint() {
+        if (!this.grid || this.isComplete) return null;
+
+        // Check if solver is available
+        if (typeof puzzleSolver === 'undefined') {
+            console.warn('Puzzle solver not available');
+            return null;
+        }
+
+        // Create pseudo-puzzle from current state
+        const pseudoPuzzle = {
+            grid: this.grid.size,
+            rowTargets: [...this.grid.rowTargets],
+            colTargets: [...this.grid.colTargets],
+            cells: this.extractCellDefinitions()
+        };
+
+        // Solve from current position
+        const result = puzzleSolver.solve(pseudoPuzzle);
+
+        if (result.solvable && result.solution.length > 0) {
+            return result.solution[0]; // Next tap [x, y]
+        }
+
+        return null; // No solution from current state
+    }
+
+    /**
+     * Extract cell definitions from current grid state
+     * @returns {Array} Cell definitions for solver
+     */
+    extractCellDefinitions() {
+        const cells = [];
+
+        for (let y = 0; y < this.grid.size; y++) {
+            for (let x = 0; x < this.grid.size; x++) {
+                const cell = this.grid.getCell(x, y);
+                const def = { x, y };
+
+                if (cell.type !== CellType.NORMAL) {
+                    def.type = cell.type;
+                }
+
+                // Calculate remaining taps for limited cells
+                if (cell.maxTaps >= 0) {
+                    const remainingTaps = cell.maxTaps - cell.tapCount;
+                    def.maxTaps = remainingTaps;
+                }
+
+                // Only include if cell has special properties
+                if (def.type || def.maxTaps !== undefined) {
+                    cells.push(def);
+                }
+            }
+        }
+
+        return cells;
+    }
+
+    /**
+     * Show hint on the board
+     * @returns {boolean} True if hint was shown, false if no hint available
+     */
+    showHint() {
+        // Clear any existing hint
+        this.clearHint();
+
+        const hint = this.getHint();
+        if (hint) {
+            this.currentHint = hint;
+            this.hintsUsed++;
+            this.renderer.showHint(hint[0], hint[1]);
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Clear the current hint display
+     */
+    clearHint() {
+        this.currentHint = null;
+        this.renderer.clearHint();
+    }
+
+    /**
+     * Get number of hints used
+     */
+    getHintsUsed() {
+        return this.hintsUsed;
     }
 
     /**
