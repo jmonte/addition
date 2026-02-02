@@ -129,7 +129,7 @@ body {
 }
 
 #game-canvas, #daily-canvas {
-    box-shadow: 0 8px 32px var(--shadow-medium);
+    box-shadow: none;
 }
 
 /* Game Header & Footer */
@@ -290,7 +290,7 @@ button:focus {
 }
 
 #tutorial-canvas {
-    box-shadow: 0 4px 16px var(--shadow-soft);
+    box-shadow: none;
 }
 
 .tutorial-instruction {
@@ -310,7 +310,7 @@ button:focus {
 }
 
 .mechanic-card-demo canvas {
-    box-shadow: 0 2px 8px var(--shadow-soft);
+    box-shadow: none;
 }
 
 .mechanic-card-header h3 {

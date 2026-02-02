@@ -182,6 +182,42 @@ class NumberPopAnimation extends Animation {
 }
 
 /**
+ * Button Press Animation - button moves down then back up
+ */
+class ButtonPressAnimation extends Animation {
+    constructor(cellX, cellY, onUpdate, onComplete) {
+        super(200); // 200ms duration for snappy feel
+        this.cellX = cellX;
+        this.cellY = cellY;
+        this.pressOffset = 0;
+        this.customOnUpdate = onUpdate;
+        this.customOnComplete = onComplete;
+    }
+
+    update(deltaTime) {
+        this.elapsed += deltaTime;
+        const progress = Math.min(this.elapsed / this.duration, 1);
+
+        // Press down then release: 0 → 4px → 0
+        if (progress < 0.4) {
+            // Press down phase
+            this.pressOffset = (progress / 0.4) * 4;
+        } else {
+            // Release phase
+            this.pressOffset = 4 - ((progress - 0.4) / 0.6) * 4;
+        }
+
+        if (this.customOnUpdate) {
+            this.customOnUpdate(this.pressOffset);
+        }
+
+        if (progress >= 1 && this.customOnComplete) {
+            this.customOnComplete();
+        }
+    }
+}
+
+/**
  * Target Complete Animation - glow effect when reaching target
  */
 class TargetCompleteAnimation extends Animation {
@@ -388,6 +424,7 @@ if (typeof module !== 'undefined' && module.exports) {
         Animation,
         RippleAnimation,
         NumberPopAnimation,
+        ButtonPressAnimation,
         TargetCompleteAnimation,
         WinCelebrationAnimation,
         FloatingPlusAnimation,

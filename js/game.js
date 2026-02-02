@@ -110,6 +110,7 @@ class Game {
 
             // Trigger animations
             this.renderer.addRipple(x, y);
+            this.renderer.addButtonPress(x, y);
 
             for (const { cell, addedValue } of affected) {
                 this.renderer.addNumberPop(cell.x, cell.y, addedValue);

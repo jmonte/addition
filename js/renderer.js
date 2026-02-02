@@ -14,22 +14,27 @@ class Renderer {
 
         // Visual settings
         this.colors = {
-            background: '#E8DCC4',
-            gridLines: '#D4C8B0',
-            stoneNormal: '#7A7A7A',
-            stoneNormalGradientLight: '#9A9A9A',
-            stoneNormalGradientDark: '#5A5A5A',
-            stoneMoss: '#5D6B5D',
-            stoneBlocker: '#2D2D2D',
-            stoneBooster: '#8BA87B',
-            stoneBoosterGlow: '#B8D4A8',
+            // Button colors
+            buttonNormalFace: '#A0A0A0',
+            buttonNormalTop: '#B8B8B8',
+            buttonNormalEdge: '#707070',
+            buttonNormalBottom: '#505050',
+            buttonBlockerFace: '#3A3A3A',
+            buttonBlockerTop: '#505050',
+            buttonBlockerEdge: '#252525',
+            buttonBlockerBottom: '#1A1A1A',
+            buttonBoosterFace: '#8BC87B',
+            buttonBoosterTop: '#A8E098',
+            buttonBoosterEdge: '#6BA86B',
+            buttonBoosterBottom: '#4A8A4A',
+            buttonBoosterGlow: 'rgba(139, 200, 123, 0.4)',
             text: '#FFFFFF',
             textDark: '#3A3A3A',
             target: '#D4A84B',
             targetComplete: '#7EB86B',
             targetOver: '#C75050',
             ripple: 'rgba(126, 184, 201, 0.6)',
-            shadow: 'rgba(0, 0, 0, 0.2)'
+            shadow: 'rgba(0, 0, 0, 0.25)'
         };
 
         // Animation state
@@ -40,6 +45,7 @@ class Renderer {
         this.completedCols = new Set();
         this.winAnimation = null;
         this.hintAnimation = null;
+        this.buttonPressOffsets = {};
 
         // Bind the render loop
         this.boundRenderLoop = this.renderLoop.bind(this);
@@ -132,12 +138,8 @@ class Renderer {
     render() {
         const ctx = this.ctx;
 
-        // Clear canvas
-        ctx.fillStyle = this.colors.background;
-        ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-
-        // Draw sand pattern
-        this.drawSandPattern();
+        // Clear canvas with transparency (blends with page background)
+        ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
         // Draw column targets (top)
         this.drawColumnTargets();
@@ -165,30 +167,6 @@ class Renderer {
         if (this.winAnimation) {
             this.winAnimation.draw(ctx);
         }
-    }
-
-    /**
-     * Draw sand pattern background
-     */
-    drawSandPattern() {
-        const ctx = this.ctx;
-        ctx.save();
-
-        ctx.strokeStyle = this.colors.gridLines;
-        ctx.lineWidth = 1;
-
-        const spacing = 12;
-        for (let i = 0; i < this.canvas.width; i += spacing) {
-            ctx.beginPath();
-            ctx.moveTo(i, 0);
-            for (let y = 0; y < this.canvas.height; y += 20) {
-                const offset = Math.sin(y / 40 + i / 100) * 2;
-                ctx.lineTo(i + offset, y);
-            }
-            ctx.stroke();
-        }
-
-        ctx.restore();
     }
 
     /**
@@ -303,33 +281,65 @@ class Renderer {
         const centerY = this.getGridStartY() + y * this.cellSize + this.cellSize / 2;
         const radius = this.cellSize * 0.4;
 
+        // Get press offset for this cell
+        const cellKey = `${x},${y}`;
+        const pressOffset = this.buttonPressOffsets[cellKey] || 0;
+
+        // Button dimensions (larger to reduce gaps between cells)
+        const buttonWidth = radius * 2.3;
+        const buttonHeight = radius * 2.1;
+
         ctx.save();
 
-        // Draw shadow
-        ctx.beginPath();
-        ctx.arc(centerX + 3, centerY + 3, radius, 0, Math.PI * 2);
+        // Draw rectangular shadow (offset decreases during press)
+        const shadowOffset = Math.max(3 - pressOffset * 0.5, 1);
+        this.drawRoundedRect(
+            ctx,
+            centerX - buttonWidth / 2 + shadowOffset,
+            centerY - buttonHeight / 2 + shadowOffset + pressOffset,
+            buttonWidth,
+            buttonHeight,
+            6
+        );
         ctx.fillStyle = this.colors.shadow;
         ctx.fill();
 
-        // Draw stone based on type
-        this.drawStone(ctx, centerX, centerY, radius, cell);
+        // Draw button based on type
+        this.drawButton(ctx, centerX, centerY, buttonWidth, buttonHeight, cell, pressOffset);
 
         // Draw tap limit indicator
         if (cell.type !== CellType.BLOCKER) {
-            this.drawTapIndicator(ctx, centerX, centerY, radius, cell);
+            this.drawTapIndicator(ctx, centerX, centerY + pressOffset, radius, cell);
         }
 
         // Draw current value
         if (cell.type !== CellType.BLOCKER && cell.value > 0) {
-            this.drawValue(ctx, centerX, centerY, cell);
+            this.drawValue(ctx, centerX, centerY, cell, pressOffset);
         }
 
         // Draw "used up" overlay if cell can no longer be tapped
         if (cell.type !== CellType.BLOCKER && !cell.canTap() && cell.maxTaps > 0) {
-            this.drawUsedOverlay(ctx, centerX, centerY, radius);
+            this.drawUsedOverlay(ctx, centerX, centerY, buttonWidth, buttonHeight, cell, pressOffset);
         }
 
         ctx.restore();
+    }
+
+    /**
+     * Draw a rounded rectangle path
+     */
+    drawRoundedRect(ctx, x, y, width, height, radius) {
+        ctx.beginPath();
+        ctx.moveTo(x + radius, y);
+        ctx.lineTo(x + width - radius, y);
+        ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+        ctx.lineTo(x + width, y + height - radius);
+        ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+        ctx.lineTo(x + radius, y + height);
+        ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+        ctx.lineTo(x, y + radius);
+        ctx.quadraticCurveTo(x, y, x + radius, y);
+        ctx.closePath();
     }
 
     /**
@@ -360,75 +370,124 @@ class Renderer {
     /**
      * Draw overlay for cells that can no longer be tapped
      */
-    drawUsedOverlay(ctx, x, y, radius) {
-        ctx.beginPath();
-        ctx.arc(x, y, radius, 0, Math.PI * 2);
+    drawUsedOverlay(ctx, x, y, width, height, cell, pressOffset = 0) {
+        this.drawRoundedRect(
+            ctx,
+            x - width / 2,
+            y - height / 2 + pressOffset,
+            width,
+            height,
+            6
+        );
         ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
         ctx.fill();
     }
 
     /**
-     * Draw stone shape
+     * Draw 3D button shape
      */
-    drawStone(ctx, x, y, radius, cell) {
-        let gradient;
-        let strokeColor;
+    drawButton(ctx, x, y, width, height, cell, pressOffset) {
+        let faceColor, topColor, edgeColor, bottomColor;
+        const cornerRadius = 6;
+        const maxEdgeHeight = 6;
+        const edgeHeight = Math.max(maxEdgeHeight - pressOffset, 1);
+
+        // Apply press offset to Y position
+        const buttonY = y + pressOffset;
 
         switch (cell.type) {
             case CellType.BLOCKER:
-                gradient = ctx.createRadialGradient(x - radius * 0.3, y - radius * 0.3, 0, x, y, radius);
-                gradient.addColorStop(0, '#4A4A4A');
-                gradient.addColorStop(1, this.colors.stoneBlocker);
-                strokeColor = '#1A1A1A';
+                faceColor = this.colors.buttonBlockerFace;
+                topColor = this.colors.buttonBlockerTop;
+                edgeColor = this.colors.buttonBlockerEdge;
+                bottomColor = this.colors.buttonBlockerBottom;
                 break;
 
             case CellType.BOOSTER:
-                gradient = ctx.createRadialGradient(x - radius * 0.3, y - radius * 0.3, 0, x, y, radius);
-                gradient.addColorStop(0, this.colors.stoneBoosterGlow);
-                gradient.addColorStop(1, this.colors.stoneBooster);
-                strokeColor = '#6B8B6B';
+                faceColor = this.colors.buttonBoosterFace;
+                topColor = this.colors.buttonBoosterTop;
+                edgeColor = this.colors.buttonBoosterEdge;
+                bottomColor = this.colors.buttonBoosterBottom;
 
-                // Draw glow effect
-                ctx.beginPath();
-                ctx.arc(x, y, radius + 4, 0, Math.PI * 2);
-                ctx.fillStyle = 'rgba(184, 212, 168, 0.3)';
+                // Draw glow effect behind button
+                ctx.save();
+                ctx.shadowColor = this.colors.buttonBoosterGlow;
+                ctx.shadowBlur = 12;
+                this.drawRoundedRect(ctx, x - width / 2, buttonY - height / 2, width, height, cornerRadius);
+                ctx.fillStyle = this.colors.buttonBoosterGlow;
                 ctx.fill();
+                ctx.restore();
                 break;
 
             default: // Normal
-                gradient = ctx.createRadialGradient(x - radius * 0.3, y - radius * 0.3, 0, x, y, radius);
-                gradient.addColorStop(0, this.colors.stoneNormalGradientLight);
-                gradient.addColorStop(1, this.colors.stoneNormalGradientDark);
-                strokeColor = '#4A4A4A';
+                faceColor = this.colors.buttonNormalFace;
+                topColor = this.colors.buttonNormalTop;
+                edgeColor = this.colors.buttonNormalEdge;
+                bottomColor = this.colors.buttonNormalBottom;
         }
 
-        // Draw stone body
-        ctx.beginPath();
-        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        // Draw bottom edge (3D depth)
+        this.drawRoundedRect(
+            ctx,
+            x - width / 2,
+            buttonY - height / 2 + edgeHeight,
+            width,
+            height,
+            cornerRadius
+        );
+        ctx.fillStyle = bottomColor;
+        ctx.fill();
+
+        // Draw left/right edges
+        this.drawRoundedRect(
+            ctx,
+            x - width / 2,
+            buttonY - height / 2,
+            width,
+            height + edgeHeight,
+            cornerRadius
+        );
+        ctx.fillStyle = edgeColor;
+        ctx.fill();
+
+        // Draw button face with gradient (top to bottom)
+        const gradient = ctx.createLinearGradient(
+            x, buttonY - height / 2,
+            x, buttonY + height / 2
+        );
+        gradient.addColorStop(0, topColor);
+        gradient.addColorStop(1, faceColor);
+
+        this.drawRoundedRect(
+            ctx,
+            x - width / 2,
+            buttonY - height / 2,
+            width,
+            height,
+            cornerRadius
+        );
         ctx.fillStyle = gradient;
         ctx.fill();
 
-        // Draw stone outline
-        ctx.strokeStyle = strokeColor;
-        ctx.lineWidth = 2;
-        ctx.stroke();
-
-        // Draw highlight
+        // Draw top highlight line
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+        ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.arc(x - radius * 0.25, y - radius * 0.25, radius * 0.2, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
-        ctx.fill();
+        ctx.moveTo(x - width / 2 + cornerRadius + 2, buttonY - height / 2 + 2);
+        ctx.lineTo(x + width / 2 - cornerRadius - 2, buttonY - height / 2 + 2);
+        ctx.stroke();
     }
 
     /**
      * Draw current value on cell
      */
-    drawValue(ctx, x, y, cell) {
+    drawValue(ctx, x, y, cell, pressOffset = 0) {
         const cellKey = `${cell.x},${cell.y}`;
         const scale = this.numberScales[cellKey] || 1;
 
         ctx.save();
-        ctx.translate(x, y);
+        // Apply press offset so number moves with button
+        ctx.translate(x, y + pressOffset);
         ctx.scale(scale, scale);
 
         const fontSize = Math.floor(this.cellSize * 0.4);
@@ -488,6 +547,27 @@ class Renderer {
         const floatAnim = new FloatingPlusAnimation(x, y, addedValue);
         this.floatingTexts.push(floatAnim);
         this.animationManager.add(floatAnim);
+    }
+
+    /**
+     * Add button press animation
+     */
+    addButtonPress(cellX, cellY) {
+        const cellKey = `${cellX},${cellY}`;
+
+        const anim = new ButtonPressAnimation(
+            cellX,
+            cellY,
+            (pressOffset) => {
+                this.buttonPressOffsets[cellKey] = pressOffset;
+            },
+            () => {
+                // Clean up offset after animation completes
+                delete this.buttonPressOffsets[cellKey];
+            }
+        );
+
+        this.animationManager.add(anim);
     }
 
     /**
@@ -556,6 +636,7 @@ class Renderer {
         this.completedRows.clear();
         this.completedCols.clear();
         this.numberScales = {};
+        this.buttonPressOffsets = {};
         this.ripples = [];
         this.floatingTexts = [];
         this.winAnimation = null;
