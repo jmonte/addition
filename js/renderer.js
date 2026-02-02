@@ -9,7 +9,8 @@ class Renderer {
         this.grid = null;
         this.cellSize = 0;
         this.padding = 20;
-        this.targetAreaSize = 40; // Space for row/column targets
+        this.targetAreaSize = 70; // Space for row/column targets (increased for larger targets + spacing)
+        this.targetRadius = 22; // Increased from 16
         this.animationManager = new AnimationManager();
 
         // Visual settings
@@ -46,6 +47,9 @@ class Renderer {
         this.winAnimation = null;
         this.hintAnimation = null;
         this.buttonPressOffsets = {};
+
+        // Hover preview state
+        this.hoverPreview = null; // { centerX, centerY, neighbors: [{x,y},...] }
 
         // Bind the render loop
         this.boundRenderLoop = this.renderLoop.bind(this);
@@ -157,6 +161,9 @@ class Renderer {
             }
         }
 
+        // Draw hover preview (after cells, before ripples)
+        this.drawHoverPreview();
+
         // Draw ripples
         this.drawRipples();
 
@@ -170,10 +177,10 @@ class Renderer {
     }
 
     /**
-     * Get the starting X position for the grid (after column for row targets)
+     * Get the starting X position for the grid (after row targets on left)
      */
     getGridStartX() {
-        return this.padding;
+        return this.padding + this.targetAreaSize;
     }
 
     /**
@@ -184,12 +191,15 @@ class Renderer {
     }
 
     /**
-     * Draw column targets at the top
+     * Draw column targets at the top with progress arc
      */
     drawColumnTargets() {
         const ctx = this.ctx;
         const startX = this.getGridStartX();
         const y = this.padding + this.targetAreaSize / 2;
+        const radius = this.targetRadius;
+        const arcWidth = 4;
+        const arcRadius = radius + arcWidth + 2;
 
         for (let col = 0; col < this.grid.size; col++) {
             const x = startX + col * this.cellSize + this.cellSize / 2;
@@ -197,10 +207,38 @@ class Renderer {
             const current = this.grid.getColSum(col);
             const isComplete = current === target;
             const isOver = current > target;
+            const progress = target > 0 ? Math.min(current / target, 1.5) : 0;
+
+            // Draw background track (gray ring)
+            ctx.beginPath();
+            ctx.arc(x, y, arcRadius, 0, Math.PI * 2);
+            ctx.strokeStyle = 'rgba(0, 0, 0, 0.15)';
+            ctx.lineWidth = arcWidth;
+            ctx.stroke();
+
+            // Draw progress arc (fills clockwise from top)
+            if (current > 0) {
+                const startAngle = -Math.PI / 2; // Start at top
+                const endAngle = startAngle + (Math.min(progress, 1) * Math.PI * 2);
+
+                ctx.beginPath();
+                ctx.arc(x, y, arcRadius, startAngle, endAngle);
+                if (isComplete) {
+                    ctx.strokeStyle = this.colors.targetComplete;
+                } else if (isOver) {
+                    ctx.strokeStyle = this.colors.targetOver;
+                } else {
+                    ctx.strokeStyle = '#7EB8C9'; // Blue progress
+                }
+                ctx.lineWidth = arcWidth;
+                ctx.lineCap = 'round';
+                ctx.stroke();
+                ctx.lineCap = 'butt';
+            }
 
             // Draw background circle
             ctx.beginPath();
-            ctx.arc(x, y, 16, 0, Math.PI * 2);
+            ctx.arc(x, y, radius, 0, Math.PI * 2);
             if (isComplete) {
                 ctx.fillStyle = this.colors.targetComplete;
             } else if (isOver) {
@@ -211,28 +249,24 @@ class Renderer {
             ctx.fill();
 
             // Draw target number
-            ctx.font = 'bold 14px sans-serif';
+            ctx.font = 'bold 18px sans-serif';
             ctx.fillStyle = '#FFFFFF';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.fillText(target.toString(), x, y);
-
-            // Draw current sum below if not zero
-            if (current > 0 && !isComplete) {
-                ctx.font = '11px sans-serif';
-                ctx.fillStyle = isOver ? this.colors.targetOver : this.colors.textDark;
-                ctx.fillText(current.toString(), x, y + 22);
-            }
         }
     }
 
     /**
-     * Draw row targets on the right
+     * Draw row targets on the left with progress arc
      */
     drawRowTargets() {
         const ctx = this.ctx;
         const startY = this.getGridStartY();
-        const x = this.getGridStartX() + this.grid.size * this.cellSize + this.targetAreaSize / 2;
+        const x = this.padding + this.targetAreaSize / 2;
+        const radius = this.targetRadius;
+        const arcWidth = 4;
+        const arcRadius = radius + arcWidth + 2;
 
         for (let row = 0; row < this.grid.size; row++) {
             const y = startY + row * this.cellSize + this.cellSize / 2;
@@ -240,10 +274,38 @@ class Renderer {
             const current = this.grid.getRowSum(row);
             const isComplete = current === target;
             const isOver = current > target;
+            const progress = target > 0 ? Math.min(current / target, 1.5) : 0;
+
+            // Draw background track (gray ring)
+            ctx.beginPath();
+            ctx.arc(x, y, arcRadius, 0, Math.PI * 2);
+            ctx.strokeStyle = 'rgba(0, 0, 0, 0.15)';
+            ctx.lineWidth = arcWidth;
+            ctx.stroke();
+
+            // Draw progress arc (fills clockwise from top)
+            if (current > 0) {
+                const startAngle = -Math.PI / 2; // Start at top
+                const endAngle = startAngle + (Math.min(progress, 1) * Math.PI * 2);
+
+                ctx.beginPath();
+                ctx.arc(x, y, arcRadius, startAngle, endAngle);
+                if (isComplete) {
+                    ctx.strokeStyle = this.colors.targetComplete;
+                } else if (isOver) {
+                    ctx.strokeStyle = this.colors.targetOver;
+                } else {
+                    ctx.strokeStyle = '#7EB8C9'; // Blue progress
+                }
+                ctx.lineWidth = arcWidth;
+                ctx.lineCap = 'round';
+                ctx.stroke();
+                ctx.lineCap = 'butt';
+            }
 
             // Draw background circle
             ctx.beginPath();
-            ctx.arc(x, y, 16, 0, Math.PI * 2);
+            ctx.arc(x, y, radius, 0, Math.PI * 2);
             if (isComplete) {
                 ctx.fillStyle = this.colors.targetComplete;
             } else if (isOver) {
@@ -254,18 +316,11 @@ class Renderer {
             ctx.fill();
 
             // Draw target number
-            ctx.font = 'bold 14px sans-serif';
+            ctx.font = 'bold 18px sans-serif';
             ctx.fillStyle = '#FFFFFF';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.fillText(target.toString(), x, y);
-
-            // Draw current sum below if not zero
-            if (current > 0 && !isComplete) {
-                ctx.font = '11px sans-serif';
-                ctx.fillStyle = isOver ? this.colors.targetOver : this.colors.textDark;
-                ctx.fillText(current.toString(), x, y + 22);
-            }
         }
     }
 
@@ -299,7 +354,7 @@ class Renderer {
             centerY - buttonHeight / 2 + shadowOffset + pressOffset,
             buttonWidth,
             buttonHeight,
-            6
+            4
         );
         ctx.fillStyle = this.colors.shadow;
         ctx.fill();
@@ -377,7 +432,7 @@ class Renderer {
             y - height / 2 + pressOffset,
             width,
             height,
-            6
+            4
         );
         ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
         ctx.fill();
@@ -388,7 +443,7 @@ class Renderer {
      */
     drawButton(ctx, x, y, width, height, cell, pressOffset) {
         let faceColor, topColor, edgeColor, bottomColor;
-        const cornerRadius = 6;
+        const cornerRadius = 4;
         const maxEdgeHeight = 6;
         const edgeHeight = Math.max(maxEdgeHeight - pressOffset, 1);
 
@@ -513,7 +568,7 @@ class Renderer {
         const x = this.getGridStartX() + cellX * this.cellSize + this.cellSize / 2;
         const y = this.getGridStartY() + cellY * this.cellSize + this.cellSize / 2;
 
-        const ripple = new RippleAnimation(x, y, this.cellSize, this.cellSize * 1.5, this.colors.ripple);
+        const ripple = new RippleAnimation(x, y, this.cellSize, this.cellSize * 2, this.colors.ripple);
         this.ripples.push(ripple);
         this.animationManager.add(ripple);
     }
@@ -630,6 +685,76 @@ class Renderer {
     }
 
     /**
+     * Set hover preview state
+     */
+    setHoverPreview(cellX, cellY, neighbors) {
+        this.hoverPreview = {
+            centerX: cellX,
+            centerY: cellY,
+            neighbors: neighbors
+        };
+    }
+
+    /**
+     * Clear hover preview state
+     */
+    clearHoverPreview() {
+        this.hoverPreview = null;
+    }
+
+    /**
+     * Draw hover preview effect (water-blue tint on hovered cell and neighbors)
+     */
+    drawHoverPreview() {
+        if (!this.hoverPreview) return;
+
+        const ctx = this.ctx;
+        const { centerX, centerY, neighbors } = this.hoverPreview;
+
+        // Draw neighbor highlights (lighter)
+        for (const neighbor of neighbors) {
+            const x = this.getGridStartX() + neighbor.x * this.cellSize + this.cellSize / 2;
+            const y = this.getGridStartY() + neighbor.y * this.cellSize + this.cellSize / 2;
+            const radius = this.cellSize * 0.4;
+            const buttonWidth = radius * 2.3;
+            const buttonHeight = radius * 2.1;
+
+            ctx.save();
+            this.drawRoundedRect(
+                ctx,
+                x - buttonWidth / 2,
+                y - buttonHeight / 2,
+                buttonWidth,
+                buttonHeight,
+                4
+            );
+            ctx.fillStyle = 'rgba(126, 184, 201, 0.45)';
+            ctx.fill();
+            ctx.restore();
+        }
+
+        // Draw center cell highlight (stronger)
+        const x = this.getGridStartX() + centerX * this.cellSize + this.cellSize / 2;
+        const y = this.getGridStartY() + centerY * this.cellSize + this.cellSize / 2;
+        const radius = this.cellSize * 0.4;
+        const buttonWidth = radius * 2.3;
+        const buttonHeight = radius * 2.1;
+
+        ctx.save();
+        this.drawRoundedRect(
+            ctx,
+            x - buttonWidth / 2,
+            y - buttonHeight / 2,
+            buttonWidth,
+            buttonHeight,
+            4
+        );
+        ctx.fillStyle = 'rgba(126, 184, 201, 0.65)';
+        ctx.fill();
+        ctx.restore();
+    }
+
+    /**
      * Reset visual state
      */
     reset() {
@@ -640,6 +765,7 @@ class Renderer {
         this.ripples = [];
         this.floatingTexts = [];
         this.winAnimation = null;
+        this.hoverPreview = null;
         this.clearHint();
         this.animationManager.clear();
     }

@@ -115,14 +115,15 @@ class Animation {
 
 /**
  * Ripple Animation - the expanding circle effect when tapping
+ * Enhanced with filled center, thick main ring, and outer ring
  */
 class RippleAnimation extends Animation {
     constructor(x, y, cellSize, maxRadius, color, onUpdate) {
-        super(400); // 400ms duration
+        super(500); // 500ms duration (slightly longer)
         this.x = x;
         this.y = y;
         this.cellSize = cellSize;
-        this.maxRadius = maxRadius || cellSize * 1.5;
+        this.maxRadius = maxRadius || cellSize * 2; // Larger spread (2x instead of 1.5x)
         this.color = color || 'rgba(126, 184, 201, 0.6)';
         this.customOnUpdate = onUpdate;
     }
@@ -142,11 +143,29 @@ class RippleAnimation extends Animation {
 
     draw(ctx) {
         ctx.save();
+
+        // 1. Draw filled inner circle (fades with ripple)
+        const innerRadius = this.currentRadius * 0.3;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, innerRadius, 0, Math.PI * 2);
+        ctx.fillStyle = this.color.replace(/[\d.]+\)$/, `${this.opacity * 0.3})`);
+        ctx.fill();
+
+        // 2. Draw main ring (5px, thicker)
         ctx.beginPath();
         ctx.arc(this.x, this.y, this.currentRadius, 0, Math.PI * 2);
-        ctx.strokeStyle = this.color.replace(/[\d.]+\)$/, `${this.opacity * 0.6})`);
-        ctx.lineWidth = 3;
+        ctx.strokeStyle = this.color.replace(/[\d.]+\)$/, `${this.opacity * 0.8})`);
+        ctx.lineWidth = 5;
         ctx.stroke();
+
+        // 3. Draw outer ring (subtle, 2px)
+        const outerRadius = this.currentRadius * 1.2;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, outerRadius, 0, Math.PI * 2);
+        ctx.strokeStyle = this.color.replace(/[\d.]+\)$/, `${this.opacity * 0.3})`);
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
         ctx.restore();
     }
 }

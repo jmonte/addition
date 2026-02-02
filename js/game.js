@@ -24,6 +24,8 @@ class Game {
         // Bind event handlers
         this.handleClick = this.handleClick.bind(this);
         this.handleTouch = this.handleTouch.bind(this);
+        this.handleMouseMove = this.handleMouseMove.bind(this);
+        this.handleMouseLeave = this.handleMouseLeave.bind(this);
 
         this.setupEventListeners();
     }
@@ -34,6 +36,8 @@ class Game {
     setupEventListeners() {
         this.canvas.addEventListener('click', this.handleClick);
         this.canvas.addEventListener('touchstart', this.handleTouch, { passive: false });
+        this.canvas.addEventListener('mousemove', this.handleMouseMove);
+        this.canvas.addEventListener('mouseleave', this.handleMouseLeave);
     }
 
     /**
@@ -42,6 +46,8 @@ class Game {
     removeEventListeners() {
         this.canvas.removeEventListener('click', this.handleClick);
         this.canvas.removeEventListener('touchstart', this.handleTouch);
+        this.canvas.removeEventListener('mousemove', this.handleMouseMove);
+        this.canvas.removeEventListener('mouseleave', this.handleMouseLeave);
     }
 
     /**
@@ -72,6 +78,42 @@ class Game {
         if (cell) {
             this.tapCell(cell.x, cell.y);
         }
+    }
+
+    /**
+     * Handle mouse move for hover preview (desktop only)
+     */
+    handleMouseMove(event) {
+        if (!this.isPlaying || this.isComplete || !this.grid) {
+            this.renderer.clearHoverPreview();
+            return;
+        }
+
+        const canvasPos = this.renderer.pageToCanvas(event.clientX, event.clientY);
+        const cell = this.renderer.getCellFromPosition(canvasPos.x, canvasPos.y);
+
+        if (cell) {
+            const gridCell = this.grid.getCell(cell.x, cell.y);
+            if (gridCell && gridCell.canTap()) {
+                // Get neighbors that can receive ripples
+                const neighbors = this.grid.getNeighbors(cell.x, cell.y)
+                    .filter(n => n.canReceiveRipple())
+                    .map(n => ({ x: n.x, y: n.y }));
+
+                this.renderer.setHoverPreview(cell.x, cell.y, neighbors);
+            } else {
+                this.renderer.clearHoverPreview();
+            }
+        } else {
+            this.renderer.clearHoverPreview();
+        }
+    }
+
+    /**
+     * Handle mouse leave to clear hover preview
+     */
+    handleMouseLeave() {
+        this.renderer.clearHoverPreview();
     }
 
     /**
