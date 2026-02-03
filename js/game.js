@@ -321,16 +321,8 @@ class Game {
             return null;
         }
 
-        // Create pseudo-puzzle from current state
-        const pseudoPuzzle = {
-            grid: this.grid.size,
-            rowTargets: [...this.grid.rowTargets],
-            colTargets: [...this.grid.colTargets],
-            cells: this.extractCellDefinitions()
-        };
-
-        // Solve from current position
-        const result = puzzleSolver.solve(pseudoPuzzle);
+        // Solve directly from current grid state (preserves cell values and tap counts)
+        const result = puzzleSolver.solveFromGrid(this.grid);
 
         if (result.solvable && result.solution.length > 0) {
             return result.solution[0]; // Next tap [x, y]

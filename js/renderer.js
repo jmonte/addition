@@ -148,8 +148,11 @@ class Renderer {
         // Draw column targets (top)
         this.drawColumnTargets();
 
-        // Draw row targets (right)
+        // Draw row targets (left)
         this.drawRowTargets();
+
+        // Draw hover preview (before cells, as background glow)
+        this.drawHoverPreview();
 
         // Draw hint (before cells so it appears behind)
         this.drawHint();
@@ -160,9 +163,6 @@ class Renderer {
                 this.drawCell(x, y);
             }
         }
-
-        // Draw hover preview (after cells, before ripples)
-        this.drawHoverPreview();
 
         // Draw ripples
         this.drawRipples();
@@ -661,7 +661,12 @@ class Renderer {
         const x = this.getGridStartX() + cellX * this.cellSize + this.cellSize / 2;
         const y = this.getGridStartY() + cellY * this.cellSize + this.cellSize / 2;
 
-        this.hintAnimation = new HintPulseAnimation(x, y, this.cellSize, () => {});
+        // Calculate button dimensions to match the cell buttons
+        const radius = this.cellSize * 0.4;
+        const buttonWidth = radius * 2.3;
+        const buttonHeight = radius * 2.1;
+
+        this.hintAnimation = new HintPulseAnimation(x, y, this.cellSize, buttonWidth, buttonHeight, () => {});
         this.animationManager.add(this.hintAnimation);
     }
 
@@ -703,53 +708,44 @@ class Renderer {
     }
 
     /**
-     * Draw hover preview effect (water-blue tint on hovered cell and neighbors)
+     * Draw hover preview effect (glow behind hovered cell and neighbors)
      */
     drawHoverPreview() {
         if (!this.hoverPreview) return;
 
         const ctx = this.ctx;
         const { centerX, centerY, neighbors } = this.hoverPreview;
+        const glowSize = this.cellSize * 0.55;
 
-        // Draw neighbor highlights (lighter)
+        // Draw neighbor glows (lighter)
         for (const neighbor of neighbors) {
             const x = this.getGridStartX() + neighbor.x * this.cellSize + this.cellSize / 2;
             const y = this.getGridStartY() + neighbor.y * this.cellSize + this.cellSize / 2;
-            const radius = this.cellSize * 0.4;
-            const buttonWidth = radius * 2.3;
-            const buttonHeight = radius * 2.1;
 
             ctx.save();
-            this.drawRoundedRect(
-                ctx,
-                x - buttonWidth / 2,
-                y - buttonHeight / 2,
-                buttonWidth,
-                buttonHeight,
-                4
-            );
-            ctx.fillStyle = 'rgba(126, 184, 201, 0.45)';
+            const gradient = ctx.createRadialGradient(x, y, 0, x, y, glowSize);
+            gradient.addColorStop(0, 'rgba(126, 184, 201, 0.5)');
+            gradient.addColorStop(0.6, 'rgba(126, 184, 201, 0.25)');
+            gradient.addColorStop(1, 'rgba(126, 184, 201, 0)');
+            ctx.fillStyle = gradient;
+            ctx.beginPath();
+            ctx.arc(x, y, glowSize, 0, Math.PI * 2);
             ctx.fill();
             ctx.restore();
         }
 
-        // Draw center cell highlight (stronger)
+        // Draw center cell glow (stronger)
         const x = this.getGridStartX() + centerX * this.cellSize + this.cellSize / 2;
         const y = this.getGridStartY() + centerY * this.cellSize + this.cellSize / 2;
-        const radius = this.cellSize * 0.4;
-        const buttonWidth = radius * 2.3;
-        const buttonHeight = radius * 2.1;
 
         ctx.save();
-        this.drawRoundedRect(
-            ctx,
-            x - buttonWidth / 2,
-            y - buttonHeight / 2,
-            buttonWidth,
-            buttonHeight,
-            4
-        );
-        ctx.fillStyle = 'rgba(126, 184, 201, 0.65)';
+        const gradient = ctx.createRadialGradient(x, y, 0, x, y, glowSize * 1.2);
+        gradient.addColorStop(0, 'rgba(126, 184, 201, 0.7)');
+        gradient.addColorStop(0.5, 'rgba(126, 184, 201, 0.35)');
+        gradient.addColorStop(1, 'rgba(126, 184, 201, 0)');
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.arc(x, y, glowSize * 1.2, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
     }

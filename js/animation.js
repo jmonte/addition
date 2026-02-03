@@ -370,18 +370,21 @@ class FloatingPlusAnimation extends Animation {
 }
 
 /**
- * Hint Pulse Animation - pulsing highlight on suggested cell
+ * Hint Pulse Animation - pulsing highlight on suggested cell (button shape)
  */
 class HintPulseAnimation extends Animation {
-    constructor(x, y, cellSize, onUpdate) {
+    constructor(x, y, cellSize, buttonWidth, buttonHeight, onUpdate) {
         super(1500); // 1.5 second pulse cycle
         this.x = x;
         this.y = y;
         this.cellSize = cellSize;
+        this.buttonWidth = buttonWidth;
+        this.buttonHeight = buttonHeight;
         this.pulseScale = 1;
         this.pulseOpacity = 0.6;
         this.customOnUpdate = onUpdate;
         this.looping = true; // Hint animation loops until cleared
+        this.stopped = false;
     }
 
     update(deltaTime) {
@@ -389,8 +392,8 @@ class HintPulseAnimation extends Animation {
         const cycleProgress = (this.elapsed % this.duration) / this.duration;
 
         // Smooth pulse effect using sine wave
-        this.pulseScale = 1 + Math.sin(cycleProgress * Math.PI * 2) * 0.15;
-        this.pulseOpacity = 0.4 + Math.sin(cycleProgress * Math.PI * 2) * 0.3;
+        this.pulseScale = 1 + Math.sin(cycleProgress * Math.PI * 2) * 0.08;
+        this.pulseOpacity = 0.5 + Math.sin(cycleProgress * Math.PI * 2) * 0.3;
 
         if (this.customOnUpdate) {
             this.customOnUpdate();
@@ -404,32 +407,57 @@ class HintPulseAnimation extends Animation {
 
     stop() {
         this.looping = false;
+        this.stopped = true;
+    }
+
+    drawRoundedRect(ctx, x, y, width, height, radius) {
+        ctx.beginPath();
+        ctx.moveTo(x + radius, y);
+        ctx.lineTo(x + width - radius, y);
+        ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+        ctx.lineTo(x + width, y + height - radius);
+        ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+        ctx.lineTo(x + radius, y + height);
+        ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+        ctx.lineTo(x, y + radius);
+        ctx.quadraticCurveTo(x, y, x + radius, y);
+        ctx.closePath();
     }
 
     draw(ctx) {
-        const radius = this.cellSize * 0.45 * this.pulseScale;
+        // Don't draw if stopped
+        if (this.stopped) return;
+
+        const w = this.buttonWidth * this.pulseScale;
+        const h = this.buttonHeight * this.pulseScale;
+        const cornerRadius = 4;
 
         ctx.save();
 
-        // Draw outer glow
-        const gradient = ctx.createRadialGradient(
-            this.x, this.y, radius * 0.5,
-            this.x, this.y, radius * 1.5
+        // Draw outer glow (larger rectangle)
+        const glowPadding = 8;
+        this.drawRoundedRect(
+            ctx,
+            this.x - w / 2 - glowPadding,
+            this.y - h / 2 - glowPadding,
+            w + glowPadding * 2,
+            h + glowPadding * 2,
+            cornerRadius + 4
         );
-        gradient.addColorStop(0, `rgba(126, 184, 201, ${this.pulseOpacity})`);
-        gradient.addColorStop(0.5, `rgba(126, 184, 201, ${this.pulseOpacity * 0.5})`);
-        gradient.addColorStop(1, 'rgba(126, 184, 201, 0)');
-
-        ctx.beginPath();
-        ctx.arc(this.x, this.y, radius * 1.5, 0, Math.PI * 2);
-        ctx.fillStyle = gradient;
+        ctx.fillStyle = `rgba(126, 184, 201, ${this.pulseOpacity * 0.4})`;
         ctx.fill();
 
-        // Draw pulsing ring
-        ctx.beginPath();
-        ctx.arc(this.x, this.y, radius, 0, Math.PI * 2);
-        ctx.strokeStyle = `rgba(126, 184, 201, ${this.pulseOpacity + 0.2})`;
-        ctx.lineWidth = 3;
+        // Draw pulsing border
+        this.drawRoundedRect(
+            ctx,
+            this.x - w / 2,
+            this.y - h / 2,
+            w,
+            h,
+            cornerRadius
+        );
+        ctx.strokeStyle = `rgba(126, 184, 201, ${this.pulseOpacity + 0.3})`;
+        ctx.lineWidth = 4;
         ctx.stroke();
 
         ctx.restore();
