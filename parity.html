@@ -1,0 +1,1012 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Parity</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      touch-action: none;
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    canvas {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="game"></canvas>
+  <script>
+    // ============================================
+    // PARITY PUZZLE GAME
+    // Like Bicolor - make all cells match the background
+    // ============================================
+
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+
+    // Color Palettes - muted, calm colors like Bicolor
+    // tileA = target color (matches background), tileB = contrasting color
+    const PALETTES = [
+      { tileA: '#2C3E50', tileB: '#ECF0F1', dot: '#E74C3C', bg: '#2C3E50' },  // Dark blue-gray / Off-white
+      { tileA: '#34495E', tileB: '#F5F5F5', dot: '#E67E22', bg: '#34495E' },  // Slate / White
+      { tileA: '#1ABC9C', tileB: '#2C3E50', dot: '#F1C40F', bg: '#1ABC9C' },  // Teal / Dark
+      { tileA: '#ECF0F1', tileB: '#3498DB', dot: '#E74C3C', bg: '#ECF0F1' },  // Off-white / Blue
+      { tileA: '#9B59B6', tileB: '#ECF0F1', dot: '#F1C40F', bg: '#9B59B6' },  // Purple / White
+      { tileA: '#2C3E50', tileB: '#1ABC9C', dot: '#E74C3C', bg: '#2C3E50' },  // Dark / Teal
+      { tileA: '#E8E8E8', tileB: '#333333', dot: '#FF6B6B', bg: '#E8E8E8' },  // Light gray / Dark gray
+      { tileA: '#3498DB', tileB: '#ECF0F1', dot: '#F39C12', bg: '#3498DB' },  // Blue / White
+      { tileA: '#27AE60', tileB: '#2C3E50', dot: '#F1C40F', bg: '#27AE60' },  // Green / Dark
+      { tileA: '#F5F5F5', tileB: '#E74C3C', dot: '#3498DB', bg: '#F5F5F5' },  // White / Red
+    ];
+
+    // Puzzle Generator
+    // Creates puzzles by working backwards: apply taps to solved state
+    function generatePuzzle(gridSize, taps, seed) {
+      // Seeded random for reproducible puzzles
+      function seededRandom(s) {
+        return function() {
+          s = Math.sin(s) * 10000;
+          return s - Math.floor(s);
+        };
+      }
+      const random = seededRandom(seed);
+
+      // Create solved grid (all parity 0)
+      const grid = [];
+      for (let r = 0; r < gridSize; r++) {
+        grid[r] = [];
+        for (let c = 0; c < gridSize; c++) {
+          grid[r][c] = { parity: 0 };
+        }
+      }
+
+      // Generate unique tap positions
+      const solution = [];
+      const used = new Set();
+      while (solution.length < taps) {
+        const r = Math.floor(random() * gridSize);
+        const c = Math.floor(random() * gridSize);
+        const key = `${r},${c}`;
+        if (!used.has(key)) {
+          used.add(key);
+          solution.push({ row: r, col: c });
+        }
+      }
+
+      // Apply taps to create the puzzle (toggle row and column for each tap)
+      for (const tap of solution) {
+        // Toggle entire row
+        for (let c = 0; c < gridSize; c++) {
+          grid[tap.row][c].parity = (grid[tap.row][c].parity + 1) % 2;
+        }
+        // Toggle entire column (except tapped cell, already done)
+        for (let r = 0; r < gridSize; r++) {
+          if (r !== tap.row) {
+            grid[r][tap.col].parity = (grid[r][tap.col].parity + 1) % 2;
+          }
+        }
+      }
+
+      return { grid, solution, tapsRequired: taps };
+    }
+
+    // Generate 100 levels with increasing difficulty
+    function generateAllLevels() {
+      const levels = [];
+      let levelId = 1;
+
+      // Difficulty progression
+      const difficulties = [
+        // Levels 1-3: 3x3, 1 tap (quick tutorial)
+        ...Array(3).fill({ gridSize: 3, taps: 1 }),
+        // Levels 4-12: 3x3, 2 taps
+        ...Array(9).fill({ gridSize: 3, taps: 2 }),
+        // Levels 13-20: 3x3, 3 taps
+        ...Array(8).fill({ gridSize: 3, taps: 3 }),
+        // Levels 21-28: 4x4, 2 taps
+        ...Array(8).fill({ gridSize: 4, taps: 2 }),
+        // Levels 29-36: 4x4, 3 taps
+        ...Array(8).fill({ gridSize: 4, taps: 3 }),
+        // Levels 37-44: 4x4, 4 taps
+        ...Array(8).fill({ gridSize: 4, taps: 4 }),
+        // Levels 45-52: 5x5, 3 taps
+        ...Array(8).fill({ gridSize: 5, taps: 3 }),
+        // Levels 53-60: 5x5, 4 taps
+        ...Array(8).fill({ gridSize: 5, taps: 4 }),
+        // Levels 61-68: 6x6, 4 taps
+        ...Array(8).fill({ gridSize: 6, taps: 4 }),
+        // Levels 69-76: 6x6, 5 taps
+        ...Array(8).fill({ gridSize: 6, taps: 5 }),
+        // Levels 77-84: 7x7, 4 taps
+        ...Array(8).fill({ gridSize: 7, taps: 4 }),
+        // Levels 85-92: 7x7, 5 taps
+        ...Array(8).fill({ gridSize: 7, taps: 5 }),
+        // Levels 93-100: 7x7, 6 taps
+        ...Array(8).fill({ gridSize: 7, taps: 6 }),
+      ];
+
+      for (let i = 0; i < 100; i++) {
+        const { gridSize, taps } = difficulties[i];
+        const seed = 12345 + i * 777; // Consistent seeds for reproducible puzzles
+        const puzzle = generatePuzzle(gridSize, taps, seed);
+
+        levels.push({
+          id: levelId++,
+          gridSize,
+          palette: i % PALETTES.length,
+          initial: puzzle.grid,
+          solution: puzzle.solution,
+          tapsRequired: puzzle.tapsRequired,
+        });
+      }
+
+      return levels;
+    }
+
+    const LEVELS = generateAllLevels();
+
+    // Game State
+    let state = {
+      currentLevel: 0,
+      grid: [],
+      tapsRemaining: 0,
+      history: [],
+      completedLevels: [],
+      showingLevelSelect: false,
+      showingWin: false,
+      winTime: 0,
+      animating: false,
+    };
+
+    // Animation State
+    let animations = [];
+
+    // Layout
+    let layout = {
+      gridX: 0,
+      gridY: 0,
+      gridSize: 0,
+      cellSize: 0,
+    };
+
+    // Input tracking
+    let pointerStart = null;
+
+    // ============================================
+    // UTILITY FUNCTIONS
+    // ============================================
+
+    function deepCopy(obj) {
+      return JSON.parse(JSON.stringify(obj));
+    }
+
+    function hexToRgba(hex, alpha) {
+      const r = parseInt(hex.slice(1, 3), 16);
+      const g = parseInt(hex.slice(3, 5), 16);
+      const b = parseInt(hex.slice(5, 7), 16);
+      return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    }
+
+    // ============================================
+    // CANVAS SETUP
+    // ============================================
+
+    function resizeCanvas() {
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = window.innerWidth * dpr;
+      canvas.height = window.innerHeight * dpr;
+      canvas.style.width = window.innerWidth + 'px';
+      canvas.style.height = window.innerHeight + 'px';
+      ctx.scale(dpr, dpr);
+      calculateLayout();
+    }
+
+    function calculateLayout() {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      const level = LEVELS[state.currentLevel];
+      const gridCount = level ? level.gridSize : 3;
+
+      // Grid takes 85% of the smaller dimension
+      const maxSize = Math.min(w, h) * 0.85;
+      layout.gridSize = maxSize;
+      layout.cellSize = maxSize / gridCount;
+      layout.gridX = (w - maxSize) / 2;
+      layout.gridY = (h - maxSize) / 2;
+    }
+
+    // ============================================
+    // LEVEL MANAGEMENT
+    // ============================================
+
+    function loadLevel(levelIndex) {
+      const level = LEVELS[levelIndex];
+      state.currentLevel = levelIndex;
+      state.grid = deepCopy(level.initial);
+      state.tapsRemaining = level.tapsRequired;
+      state.history = [];
+      state.showingWin = false;
+      state.showingLevelSelect = false;
+      state.animating = false;
+      animations = [];
+      calculateLayout();
+      saveProgress();
+    }
+
+    function checkWin() {
+      const level = LEVELS[state.currentLevel];
+      const grid = state.grid;
+
+      // Must use exactly the right number of taps
+      if (state.tapsRemaining !== 0) return false;
+
+      // All cells must be parity 0 (matching background)
+      for (let r = 0; r < level.gridSize; r++) {
+        for (let c = 0; c < level.gridSize; c++) {
+          if (grid[r][c].parity !== 0) return false;
+        }
+      }
+      return true;
+    }
+
+    function handleWin() {
+      state.showingWin = true;
+      state.winTime = performance.now();
+      if (!state.completedLevels.includes(state.currentLevel)) {
+        state.completedLevels.push(state.currentLevel);
+      }
+      saveProgress();
+    }
+
+    // ============================================
+    // GAME LOGIC
+    // ============================================
+
+    function handleTap(row, col, tapX = 0.5, tapY = 0.5) {
+      if (state.showingWin || state.showingLevelSelect || state.animating) return;
+      if (state.tapsRemaining <= 0) return;
+
+      const level = LEVELS[state.currentLevel];
+      const gridSize = level.gridSize;
+
+      // Block further taps during animation
+      state.animating = true;
+
+      // Save state for undo (including tapsRemaining)
+      state.history.push({ grid: deepCopy(state.grid), tapsRemaining: state.tapsRemaining });
+
+      // Decrement taps remaining
+      state.tapsRemaining--;
+
+      // Keep only last 50 moves for memory
+      if (state.history.length > 50) {
+        state.history.shift();
+      }
+
+      // Calculate max distance for wave timing
+      let maxDist = 0;
+      const pulseDuration = 300;
+      const waveDelay = 80;
+
+      // Tapped cell pulses first
+      toggleCell(row, col, 0, 'pulse', pulseDuration);
+
+      // Toggle rest of row with wave delay from tap point
+      for (let c = 0; c < gridSize; c++) {
+        if (c !== col) {
+          const dist = Math.abs(c - col);
+          maxDist = Math.max(maxDist, dist);
+          toggleCell(row, c, dist * waveDelay, 'pulse', pulseDuration);
+        }
+      }
+
+      // Toggle rest of column with wave delay from tap point
+      for (let r = 0; r < gridSize; r++) {
+        if (r !== row) {
+          const dist = Math.abs(r - row);
+          maxDist = Math.max(maxDist, dist);
+          toggleCell(r, col, dist * waveDelay, 'pulse', pulseDuration);
+        }
+      }
+
+      // Check win and re-enable tapping after animations complete
+      const animDuration = maxDist * waveDelay + pulseDuration;
+      setTimeout(() => {
+        state.animating = false;
+        if (checkWin()) {
+          handleWin();
+        }
+      }, animDuration + 50);
+
+      saveProgress();
+    }
+
+    function toggleCell(row, col, delay = 0, direction = 'horizontal', duration = 300) {
+      const cell = state.grid[row][col];
+      const previousParity = cell.parity;
+
+      // Toggle parity
+      cell.parity = (cell.parity + 1) % 2;
+
+      // Add wave flip animation - stores previous state for smooth transition
+      animations.push({
+        type: 'flip',
+        row,
+        col,
+        direction,
+        startTime: performance.now() + delay,
+        duration,
+        previousParity,
+      });
+    }
+
+    function undo() {
+      if (state.history.length > 0 && !state.showingWin && !state.showingLevelSelect) {
+        const prevState = state.history.pop();
+        state.grid = prevState.grid;
+        state.tapsRemaining = prevState.tapsRemaining;
+        state.animating = false;
+        animations = [];
+        saveProgress();
+      }
+    }
+
+    function resetLevel() {
+      if (!state.showingLevelSelect) {
+        loadLevel(state.currentLevel);
+      }
+    }
+
+    // ============================================
+    // PERSISTENCE
+    // ============================================
+
+    function saveProgress() {
+      const saveData = {
+        currentLevel: state.currentLevel,
+        grid: state.grid,
+        tapsRemaining: state.tapsRemaining,
+        history: state.history,
+        completedLevels: state.completedLevels,
+      };
+      try {
+        localStorage.setItem('parity_save_v2', JSON.stringify(saveData));
+      } catch (e) {
+        // Storage might be full or unavailable
+      }
+    }
+
+    function loadProgress() {
+      try {
+        const saved = localStorage.getItem('parity_save_v2');
+        if (saved) {
+          const data = JSON.parse(saved);
+          state.completedLevels = data.completedLevels || [];
+          if (data.currentLevel !== undefined && data.grid) {
+            state.currentLevel = data.currentLevel;
+            state.grid = data.grid;
+            state.tapsRemaining = data.tapsRemaining;
+            state.history = data.history || [];
+            calculateLayout();
+            return true;
+          }
+        }
+      } catch (e) {
+        // Corrupted save, start fresh
+      }
+      return false;
+    }
+
+    // ============================================
+    // INPUT HANDLING
+    // ============================================
+
+    function getPointerPos(e) {
+      const rect = canvas.getBoundingClientRect();
+      const x = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
+      const y = (e.touches ? e.touches[0].clientY : e.clientY) - rect.top;
+      return { x, y };
+    }
+
+    function screenToGrid(x, y) {
+      const level = LEVELS[state.currentLevel];
+      const gridSize = level.gridSize;
+
+      const relX = x - layout.gridX;
+      const relY = y - layout.gridY;
+
+      if (relX < 0 || relY < 0 || relX > layout.gridSize || relY > layout.gridSize) {
+        return null;
+      }
+
+      const col = Math.floor(relX / layout.cellSize);
+      const row = Math.floor(relY / layout.cellSize);
+
+      if (row < 0 || row >= gridSize || col < 0 || col >= gridSize) {
+        return null;
+      }
+
+      return { row, col };
+    }
+
+    function checkCornerIcon(x, y) {
+      const iconSize = 40;
+      const margin = 20;
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+
+      // Top-left: Level select
+      if (x < margin + iconSize && y < margin + iconSize) {
+        return 'levelSelect';
+      }
+      // Top-right: Reset
+      if (x > w - margin - iconSize && y < margin + iconSize) {
+        return 'reset';
+      }
+      // Bottom-left: Undo
+      if (x < margin + iconSize && y > h - margin - iconSize) {
+        return 'undo';
+      }
+      return null;
+    }
+
+    function handlePointerDown(e) {
+      e.preventDefault();
+      pointerStart = getPointerPos(e);
+    }
+
+    function handlePointerUp(e) {
+      e.preventDefault();
+      if (!pointerStart) return;
+
+      const pos = e.changedTouches ?
+        { x: e.changedTouches[0].clientX - canvas.getBoundingClientRect().left,
+          y: e.changedTouches[0].clientY - canvas.getBoundingClientRect().top } :
+        getPointerPos(e);
+
+      const dx = pos.x - pointerStart.x;
+      const dy = pos.y - pointerStart.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      // Only register as tap if movement < 10px
+      if (dist < 10) {
+        handleClick(pos.x, pos.y);
+      }
+
+      pointerStart = null;
+    }
+
+    function handleClick(x, y) {
+      // Check for win screen tap
+      if (state.showingWin) {
+        const elapsed = performance.now() - state.winTime;
+        if (elapsed > 500) {
+          // Auto-advance to next level or back to level select
+          if (state.currentLevel < LEVELS.length - 1) {
+            loadLevel(state.currentLevel + 1);
+          } else {
+            state.showingLevelSelect = true;
+            state.showingWin = false;
+          }
+        }
+        return;
+      }
+
+      // Check for level select screen
+      if (state.showingLevelSelect) {
+        const selected = getLevelSelectHit(x, y);
+        if (selected !== null) {
+          loadLevel(selected);
+        }
+        return;
+      }
+
+      // Check corner icons
+      const icon = checkCornerIcon(x, y);
+      if (icon === 'levelSelect') {
+        state.showingLevelSelect = true;
+        levelSelectPage = Math.floor(state.currentLevel / levelsPerPage);
+        return;
+      }
+      if (icon === 'reset') {
+        resetLevel();
+        return;
+      }
+      if (icon === 'undo') {
+        undo();
+        return;
+      }
+
+      // Check grid tap
+      const cell = screenToGrid(x, y);
+      if (cell) {
+        // Calculate tap position within cell (0-1 range)
+        const cellX = layout.gridX + cell.col * layout.cellSize;
+        const cellY = layout.gridY + cell.row * layout.cellSize;
+        const tapX = (x - cellX) / layout.cellSize;
+        const tapY = (y - cellY) / layout.cellSize;
+        handleTap(cell.row, cell.col, tapX, tapY);
+      }
+    }
+
+    function getLevelSelectHit(x, y) {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      const cols = 5;
+      const rows = 4;
+      const cellSize = Math.min(w * 0.9 / cols, h * 0.65 / rows);
+      const gridW = cols * cellSize;
+      const gridH = rows * cellSize;
+      const startX = (w - gridW) / 2;
+      const startY = (h - gridH) / 2 + 20;
+
+      const totalPages = Math.ceil(LEVELS.length / levelsPerPage);
+
+      // Check left arrow
+      if (x < 50 && y > h / 2 - 30 && y < h / 2 + 30 && levelSelectPage > 0) {
+        levelSelectPage--;
+        return null;
+      }
+
+      // Check right arrow
+      if (x > w - 50 && y > h / 2 - 30 && y < h / 2 + 30 && levelSelectPage < totalPages - 1) {
+        levelSelectPage++;
+        return null;
+      }
+
+      const col = Math.floor((x - startX) / cellSize);
+      const row = Math.floor((y - startY) / cellSize);
+
+      if (col >= 0 && col < cols && row >= 0 && row < rows) {
+        const idx = row * cols + col;
+        const level = levelSelectPage * levelsPerPage + idx;
+        if (level < LEVELS.length) {
+          return level;
+        }
+      }
+      return null;
+    }
+
+    // ============================================
+    // RENDERING
+    // ============================================
+
+    function render() {
+      const now = performance.now();
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      const level = LEVELS[state.currentLevel];
+      const palette = PALETTES[level.palette];
+
+      // Clear with background color (target color = tileA)
+      ctx.fillStyle = palette.bg;
+      ctx.fillRect(0, 0, w, h);
+
+      if (state.showingLevelSelect) {
+        renderLevelSelect();
+      } else {
+        renderGrid(now);
+        renderTapsRemaining();
+        renderCornerIcons();
+
+        if (state.showingWin) {
+          renderWinOverlay(now);
+        }
+      }
+
+      // Clean up finished animations
+      animations = animations.filter(a => now < a.startTime + a.duration);
+
+      requestAnimationFrame(render);
+    }
+
+    function renderGrid(now) {
+      const level = LEVELS[state.currentLevel];
+      const palette = PALETTES[level.palette];
+      const gridSize = level.gridSize;
+
+      for (let r = 0; r < gridSize; r++) {
+        for (let c = 0; c < gridSize; c++) {
+          const cell = state.grid[r][c];
+          // Round to whole pixels and add 1px overlap to prevent gaps
+          const x = Math.floor(layout.gridX + c * layout.cellSize);
+          const y = Math.floor(layout.gridY + r * layout.cellSize);
+          const centerX = x + layout.cellSize / 2;
+          const centerY = y + layout.cellSize / 2;
+
+          // Get slide animation for this cell (active or pending)
+          let slideAnim = null;
+
+          for (const anim of animations) {
+            if (anim.row === r && anim.col === c && anim.type === 'flip') {
+              const elapsed = now - anim.startTime;
+              if (elapsed < anim.duration) {
+                slideAnim = { elapsed, anim };
+              }
+            }
+          }
+
+          // Draw cell with pulse compression animation
+          const baseSize = layout.cellSize;
+
+          // Helper to draw rect with individual corner radii [tl, tr, br, bl]
+          function drawRoundedRectCorners(rx, ry, rw, rh, radii) {
+            const [tl, tr, br, bl] = radii;
+            ctx.beginPath();
+            ctx.moveTo(rx + tl, ry);
+            ctx.lineTo(rx + rw - tr, ry);
+            if (tr > 0) {
+              ctx.arcTo(rx + rw, ry, rx + rw, ry + tr, tr);
+            }
+            ctx.lineTo(rx + rw, ry + rh - br);
+            if (br > 0) {
+              ctx.arcTo(rx + rw, ry + rh, rx + rw - br, ry + rh, br);
+            }
+            ctx.lineTo(rx + bl, ry + rh);
+            if (bl > 0) {
+              ctx.arcTo(rx, ry + rh, rx, ry + rh - bl, bl);
+            }
+            ctx.lineTo(rx, ry + tl);
+            if (tl > 0) {
+              ctx.arcTo(rx, ry, rx + tl, ry, tl);
+            }
+            ctx.closePath();
+            ctx.fill();
+          }
+
+          // Helper to blend two hex colors
+          function blendColors(color1, color2, t) {
+            const r1 = parseInt(color1.slice(1, 3), 16);
+            const g1 = parseInt(color1.slice(3, 5), 16);
+            const b1 = parseInt(color1.slice(5, 7), 16);
+            const r2 = parseInt(color2.slice(1, 3), 16);
+            const g2 = parseInt(color2.slice(3, 5), 16);
+            const b2 = parseInt(color2.slice(5, 7), 16);
+            const rm = Math.round(r1 + (r2 - r1) * t);
+            const gm = Math.round(g1 + (g2 - g1) * t);
+            const bm = Math.round(b1 + (b2 - b1) * t);
+            return `rgb(${rm},${gm},${bm})`;
+          }
+
+          // Get current display parity for this cell
+          let displayParity = cell.parity;
+          let isAnimating = false;
+          let animProgress = 0;
+
+          if (slideAnim) {
+            const { elapsed, anim } = slideAnim;
+            if (elapsed < 0) {
+              displayParity = anim.previousParity;
+            } else {
+              isAnimating = true;
+              animProgress = elapsed / anim.duration;
+              displayParity = animProgress < 0.5 ? anim.previousParity : cell.parity;
+            }
+          }
+
+          if (isAnimating) {
+            const { elapsed, anim } = slideAnim;
+            const prevColor = anim.previousParity === 0 ? palette.tileA : palette.tileB;
+            const currColor = cell.parity === 0 ? palette.tileA : palette.tileB;
+            const t = animProgress;
+
+            // Fluffy pulse: 1.0 → 0.85 → 1.0
+            const pulseAmount = Math.sin(t * Math.PI);
+            const scale = 1 - 0.15 * pulseAmount;
+
+            // Rounding during animation
+            const animRadius = baseSize * 0.2 * pulseAmount;
+
+            // Smooth color blend through midpoint
+            let displayColor;
+            if (t < 0.35) {
+              displayColor = blendColors(prevColor, currColor, t / 0.35 * 0.5);
+            } else if (t < 0.65) {
+              displayColor = blendColors(prevColor, currColor, 0.5);
+            } else {
+              displayColor = blendColors(prevColor, currColor, 0.5 + (t - 0.65) / 0.35 * 0.5);
+            }
+
+            // Calculate scaled dimensions from center
+            const scaledSize = baseSize * scale;
+            const offsetX = (baseSize - scaledSize) / 2;
+            const offsetY = (baseSize - scaledSize) / 2;
+
+            // Draw scaled rounded cell
+            ctx.fillStyle = displayColor;
+            drawRoundedRectCorners(x + offsetX, y + offsetY, scaledSize, scaledSize, [animRadius, animRadius, animRadius, animRadius]);
+          } else {
+            // No animation - draw simple rectangle
+            ctx.fillStyle = displayParity === 0 ? palette.tileA : palette.tileB;
+            ctx.fillRect(Math.floor(x), Math.floor(y), Math.ceil(baseSize), Math.ceil(baseSize));
+          }
+        }
+      }
+    }
+
+    function renderTapsRemaining() {
+      const w = window.innerWidth;
+      const level = LEVELS[state.currentLevel];
+      const palette = PALETTES[level.palette];
+
+      // Draw taps remaining as dots at bottom center
+      const dotRadius = 8;
+      const dotSpacing = 24;
+      const totalTaps = level.tapsRequired;
+      const totalWidth = (totalTaps - 1) * dotSpacing;
+      const startX = w / 2 - totalWidth / 2;
+      const dotY = layout.gridY + layout.gridSize + 30;
+
+      for (let i = 0; i < totalTaps; i++) {
+        ctx.beginPath();
+        ctx.arc(startX + i * dotSpacing, dotY, dotRadius, 0, Math.PI * 2);
+        // Filled for remaining, hollow for used
+        if (i < state.tapsRemaining) {
+          ctx.fillStyle = palette.dot;
+          ctx.fill();
+        } else {
+          ctx.strokeStyle = hexToRgba(palette.dot, 0.3);
+          ctx.lineWidth = 2;
+          ctx.stroke();
+        }
+      }
+
+      // Show level number and grid size
+      ctx.fillStyle = hexToRgba('#666666', 0.6);
+      ctx.font = '14px -apple-system, BlinkMacSystemFont, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(`Level ${state.currentLevel + 1}  •  ${level.gridSize}×${level.gridSize}`, w / 2, layout.gridY - 20);
+
+      // Show message if out of taps but not solved
+      if (state.tapsRemaining === 0 && !state.animating) {
+        // Check if solved
+        let solved = true;
+        for (let r = 0; r < level.gridSize && solved; r++) {
+          for (let c = 0; c < level.gridSize && solved; c++) {
+            if (state.grid[r][c].parity !== 0) solved = false;
+          }
+        }
+        if (!solved) {
+          ctx.fillStyle = hexToRgba('#e74c3c', 0.8);
+          ctx.font = '16px -apple-system, BlinkMacSystemFont, sans-serif';
+          ctx.fillText('Tap undo or reset to try again', w / 2, dotY + 30);
+        }
+      }
+    }
+
+    function renderCornerIcons() {
+      const iconSize = 24;
+      const margin = 28;
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      const bgSize = 44;
+
+      // Draw semi-transparent backgrounds for better visibility
+      ctx.fillStyle = 'rgba(128, 128, 128, 0.25)';
+
+      // Top-left background
+      ctx.beginPath();
+      ctx.arc(margin + iconSize / 2, margin + iconSize / 2, bgSize / 2, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Top-right background
+      ctx.beginPath();
+      ctx.arc(w - margin - iconSize / 2, margin + iconSize / 2, bgSize / 2, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Bottom-left background
+      ctx.beginPath();
+      ctx.arc(margin + iconSize / 2, h - margin - iconSize / 2, bgSize / 2, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Icon stroke style - use contrasting color
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+      ctx.lineWidth = 2.5;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+
+      // Top-left: Grid icon (level select)
+      const gx = margin;
+      const gy = margin;
+      const gs = iconSize / 3;
+      for (let i = 0; i < 3; i++) {
+        for (let j = 0; j < 3; j++) {
+          ctx.strokeRect(gx + j * gs + 1, gy + i * gs + 1, gs - 2, gs - 2);
+        }
+      }
+
+      // Top-right: Refresh icon (reset)
+      const rx = w - margin - iconSize / 2;
+      const ry = margin + iconSize / 2;
+      const rr = iconSize / 2 - 2;
+      ctx.beginPath();
+      ctx.arc(rx, ry, rr, -Math.PI * 0.8, Math.PI * 0.6);
+      ctx.stroke();
+      // Arrow head
+      const arrowX = rx + rr * Math.cos(Math.PI * 0.6);
+      const arrowY = ry + rr * Math.sin(Math.PI * 0.6);
+      ctx.beginPath();
+      ctx.moveTo(arrowX - 4, arrowY - 6);
+      ctx.lineTo(arrowX, arrowY);
+      ctx.lineTo(arrowX + 6, arrowY - 4);
+      ctx.stroke();
+
+      // Bottom-left: Undo arrow
+      const ux = margin + iconSize / 2;
+      const uy = h - margin - iconSize / 2;
+      ctx.beginPath();
+      ctx.moveTo(ux + 8, uy - 6);
+      ctx.lineTo(ux - 4, uy);
+      ctx.lineTo(ux + 8, uy + 6);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(ux - 4, uy);
+      ctx.lineTo(ux + 10, uy);
+      ctx.stroke();
+    }
+
+    // Level select pagination
+    let levelSelectPage = 0;
+    const levelsPerPage = 20;
+
+    function renderLevelSelect() {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      const cols = 5;
+      const rows = 4;
+      const cellSize = Math.min(w * 0.9 / cols, h * 0.65 / rows);
+      const gridW = cols * cellSize;
+      const gridH = rows * cellSize;
+      const startX = (w - gridW) / 2;
+      const startY = (h - gridH) / 2 + 20;
+
+      const totalPages = Math.ceil(LEVELS.length / levelsPerPage);
+      const startLevel = levelSelectPage * levelsPerPage;
+      const endLevel = Math.min(startLevel + levelsPerPage, LEVELS.length);
+
+      // Background
+      ctx.fillStyle = PALETTES[0].bg;
+      ctx.fillRect(0, 0, w, h);
+
+      // Title with page info
+      ctx.fillStyle = '#666666';
+      ctx.font = 'bold 20px -apple-system, BlinkMacSystemFont, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(`Levels ${startLevel + 1}-${endLevel}`, w / 2, startY - 30);
+
+      // Level cells
+      for (let i = startLevel; i < endLevel; i++) {
+        const idx = i - startLevel;
+        const row = Math.floor(idx / cols);
+        const col = idx % cols;
+        const x = startX + col * cellSize + 4;
+        const y = startY + row * cellSize + 4;
+        const size = cellSize - 8;
+
+        const level = LEVELS[i];
+        const palette = PALETTES[level.palette];
+        const completed = state.completedLevels.includes(i);
+
+        // Cell background
+        ctx.fillStyle = completed ? palette.tileA : palette.tileB;
+        ctx.fillRect(x, y, size, size);
+
+        // Level number
+        ctx.fillStyle = completed ? '#ffffff' : '#555555';
+        ctx.font = 'bold 16px -apple-system, BlinkMacSystemFont, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(String(i + 1), x + size / 2, y + size / 2);
+
+        // Small indicator for taps required
+        ctx.fillStyle = hexToRgba('#666666', 0.5);
+        ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
+        ctx.fillText(`${level.tapsRequired} tap${level.tapsRequired > 1 ? 's' : ''}`, x + size / 2, y + size - 10);
+      }
+
+      // Page navigation arrows
+      ctx.fillStyle = '#666666';
+      ctx.font = 'bold 30px -apple-system, BlinkMacSystemFont, sans-serif';
+      ctx.textBaseline = 'middle';
+
+      // Left arrow
+      if (levelSelectPage > 0) {
+        ctx.textAlign = 'left';
+        ctx.fillText('‹', 20, h / 2);
+      }
+
+      // Right arrow
+      if (levelSelectPage < totalPages - 1) {
+        ctx.textAlign = 'right';
+        ctx.fillText('›', w - 20, h / 2);
+      }
+
+      // Page dots
+      const dotY = startY + gridH + 25;
+      const dotSpacing = 15;
+      const dotsStartX = w / 2 - (totalPages - 1) * dotSpacing / 2;
+      for (let p = 0; p < totalPages; p++) {
+        ctx.beginPath();
+        ctx.arc(dotsStartX + p * dotSpacing, dotY, p === levelSelectPage ? 5 : 3, 0, Math.PI * 2);
+        ctx.fillStyle = p === levelSelectPage ? '#666666' : '#cccccc';
+        ctx.fill();
+      }
+    }
+
+    function renderWinOverlay(now) {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      const elapsed = now - state.winTime;
+      const alpha = Math.min(1, elapsed / 300) * 0.85;
+
+      // Semi-transparent overlay
+      ctx.fillStyle = hexToRgba('#ffffff', alpha);
+      ctx.fillRect(0, 0, w, h);
+
+      if (elapsed > 200) {
+        const textAlpha = Math.min(1, (elapsed - 200) / 200);
+        ctx.fillStyle = hexToRgba('#555555', textAlpha);
+        ctx.font = 'bold 32px -apple-system, BlinkMacSystemFont, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        const isLastLevel = state.currentLevel === LEVELS.length - 1;
+        const message = isLastLevel ? 'Congratulations!' : 'Level Complete!';
+        ctx.fillText(message, w / 2, h / 2 - 20);
+
+        ctx.font = '18px -apple-system, BlinkMacSystemFont, sans-serif';
+        const subMessage = isLastLevel ? 'You finished all levels!' : 'Tap to continue';
+        ctx.fillText(subMessage, w / 2, h / 2 + 20);
+      }
+    }
+
+    // ============================================
+    // INITIALIZATION
+    // ============================================
+
+    function init() {
+      // Setup canvas
+      resizeCanvas();
+      window.addEventListener('resize', resizeCanvas);
+
+      // Load saved progress or start fresh
+      if (!loadProgress()) {
+        loadLevel(0);
+      }
+
+      // Input events
+      canvas.addEventListener('pointerdown', handlePointerDown);
+      canvas.addEventListener('pointerup', handlePointerUp);
+      canvas.addEventListener('pointercancel', () => { pointerStart = null; });
+
+      // Prevent context menu on long press
+      canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+      // Save on visibility change and before unload
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') {
+          saveProgress();
+        }
+      });
+      window.addEventListener('beforeunload', saveProgress);
+
+      // Start render loop
+      requestAnimationFrame(render);
+    }
+
+    init();
+  </script>
+</body>
+</html>
