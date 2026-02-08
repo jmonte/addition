@@ -50,123 +50,1551 @@
       { tileA: '#F5F5F5', tileB: '#E74C3C', dot: '#3498DB', bg: '#F5F5F5' },  // White / Red
     ];
 
-    // Puzzle Generator
-    // Creates puzzles by working backwards: apply taps to solved state
-    function generatePuzzle(gridSize, taps, seed) {
-      // Seeded random for reproducible puzzles
-      function seededRandom(s) {
-        return function() {
-          s = Math.sin(s) * 10000;
-          return s - Math.floor(s);
-        };
-      }
-      const random = seededRandom(seed);
-
-      // Create solved grid (all parity 0)
+    // Build puzzles from fixed solutions
+    function buildGridFromSolution(gridSize, solution, options = {}) {
       const grid = [];
       for (let r = 0; r < gridSize; r++) {
         grid[r] = [];
         for (let c = 0; c < gridSize; c++) {
-          grid[r][c] = { parity: 0 };
+          grid[r][c] = { parity: 0, dot: 0, block: 0, echo: 0, wind: 0, windDir: 0 };
         }
       }
 
-      // Generate unique tap positions
-      const solution = [];
-      const used = new Set();
-      while (solution.length < taps) {
+      const blockMask = options.blocks || null;
+      if (blockMask) {
+        for (const block of blockMask) {
+          grid[block.row][block.col].block = 1;
+        }
+      }
+
+      const echoCells = options.echoCells || null;
+      let echoState = null;
+      if (echoCells) {
+        for (const cell of echoCells) {
+          grid[cell.row][cell.col].echo = 1;
+        }
+        if (options.mechanic === 'echo') {
+          const remaining = new Set(echoCells.map(cell => `${cell.row},${cell.col}`));
+          echoState = { remaining, consumeGrid: false };
+        }
+      }
+
+      const windCells = options.windCells || null;
+      if (windCells) {
+        for (const cell of windCells) {
+          grid[cell.row][cell.col].wind = 1;
+          grid[cell.row][cell.col].windDir = cell.dir;
+        }
+      }
+
+      for (const tap of solution) {
+        applyTapToGrid(grid, tap.row, tap.col, gridSize, options.mechanic || 'classic', blockMask, echoState);
+      }
+
+      if (windCells) {
+        for (const cell of windCells) {
+          grid[cell.row][cell.col].wind = 1;
+          grid[cell.row][cell.col].windDir = cell.dir;
+        }
+      }
+
+      return grid;
+    }
+
+    function createSeededRandom(seed) {
+      return function() {
+        seed = Math.sin(seed) * 10000;
+        return seed - Math.floor(seed);
+      };
+    }
+
+    function mechanicHas(mechanic, token) {
+      if (!mechanic) return false;
+      if (mechanic === token) return true;
+      if (mechanic === 'classic') return token === 'classic';
+      return mechanic.split('+').includes(token);
+    }
+
+    function scorePuzzleInterestingness(grid, solution, gridSize) {
+      let score = 0;
+
+      let parity1Count = 0;
+      for (let r = 0; r < gridSize; r++) {
+        for (let c = 0; c < gridSize; c++) {
+          if (grid[r][c].parity === 1) {
+            parity1Count++;
+          }
+        }
+      }
+
+      const totalCells = gridSize * gridSize;
+      const parity1Ratio = parity1Count / totalCells;
+      const optimalRatio = 0.45;
+      const ratioScore = 18 * (1 - Math.abs(parity1Ratio - optimalRatio) / optimalRatio);
+      score += Math.max(0, ratioScore);
+
+      let solidBlocks = 0;
+      for (let r = 0; r < gridSize - 1; r++) {
+        for (let c = 0; c < gridSize - 1; c++) {
+          const p00 = grid[r][c].parity;
+          const p01 = grid[r][c + 1].parity;
+          const p10 = grid[r + 1][c].parity;
+          const p11 = grid[r + 1][c + 1].parity;
+          if (p00 === p01 && p01 === p10 && p10 === p11) {
+            solidBlocks++;
+          }
+        }
+      }
+      const maxBlocks = (gridSize - 1) * (gridSize - 1);
+      const solidPenalty = 12 * (solidBlocks / Math.max(1, maxBlocks));
+      score += 12 - solidPenalty;
+
+      let adjacentPairs = 0;
+      let alignedPairs = 0;
+      for (let i = 0; i < solution.length; i++) {
+        for (let j = i + 1; j < solution.length; j++) {
+          const dr = Math.abs(solution[i].row - solution[j].row);
+          const dc = Math.abs(solution[i].col - solution[j].col);
+          if (dr <= 1 && dc <= 1) adjacentPairs++;
+          if (solution[i].row === solution[j].row || solution[i].col === solution[j].col) alignedPairs++;
+        }
+      }
+      const maxPairs = solution.length * (solution.length - 1) / 2;
+      score += 18 * (1 - adjacentPairs / Math.max(1, maxPairs));
+      score += 18 * (1 - alignedPairs / Math.max(1, maxPairs));
+
+      const toggleCounts = buildToggleCounts(gridSize, solution);
+
+      let multiToggleCells = 0;
+      for (let r = 0; r < gridSize; r++) {
+        for (let c = 0; c < gridSize; c++) {
+          if (toggleCounts[r][c] >= 2) multiToggleCells++;
+        }
+      }
+      score += 30 * (multiToggleCells / totalCells);
+
+      return score;
+    }
+
+    function buildToggleCounts(gridSize, solution) {
+      const counts = [];
+      for (let r = 0; r < gridSize; r++) {
+        counts[r] = [];
+        for (let c = 0; c < gridSize; c++) {
+          counts[r][c] = 0;
+        }
+      }
+
+      for (const tap of solution) {
+        for (let c = 0; c < gridSize; c++) {
+          counts[tap.row][c]++;
+        }
+        for (let r = 0; r < gridSize; r++) {
+          if (r !== tap.row) {
+            counts[r][tap.col]++;
+          }
+        }
+      }
+
+      return counts;
+    }
+
+    function buildToggleCountsForMechanic(gridSize, solution, mechanic, blocks = null, winds = null) {
+      const hasBlocks = mechanicHas(mechanic, 'blocks');
+      const hasWind = mechanicHas(mechanic, 'wind');
+
+      if (!hasBlocks && !hasWind) {
+        return buildToggleCounts(gridSize, solution);
+      }
+
+      const counts = [];
+      const grid = [];
+      for (let r = 0; r < gridSize; r++) {
+        counts[r] = [];
+        grid[r] = [];
+        for (let c = 0; c < gridSize; c++) {
+          counts[r][c] = 0;
+          grid[r][c] = { block: 0, wind: 0, windDir: 0 };
+        }
+      }
+
+      if (blocks) {
+        for (const block of blocks) {
+          grid[block.row][block.col].block = 1;
+        }
+      }
+
+      if (winds) {
+        for (const cell of winds) {
+          grid[cell.row][cell.col].wind = 1;
+          grid[cell.row][cell.col].windDir = cell.dir;
+        }
+      }
+
+      const isBlocked = (r, c) => hasBlocks && grid[r][c].block === 1;
+
+      for (const tap of solution) {
+        if (hasBlocks && isBlocked(tap.row, tap.col)) {
+          continue;
+        }
+
+        const windQueue = [];
+        const queueWind = (r, c) => {
+          if (!hasWind) return;
+          if (grid[r][c].wind !== 1) return;
+          const dir = grid[r][c].windDir;
+          grid[r][c].wind = 0;
+          grid[r][c].windDir = 0;
+          windQueue.push({ row: r, col: c, dir });
+        };
+
+        const toggleCell = (r, c) => {
+          counts[r][c] += 1;
+          queueWind(r, c);
+        };
+
+        const processWindQueue = () => {
+          if (!hasWind) return;
+          while (windQueue.length) {
+            const wind = windQueue.shift();
+            const delta = DIR_VECTORS[wind.dir % 4] || DIR_VECTORS[0];
+            let r = wind.row + delta.dr;
+            let c = wind.col + delta.dc;
+            while (r >= 0 && r < gridSize && c >= 0 && c < gridSize) {
+              if (hasBlocks && isBlocked(r, c)) {
+                break;
+              }
+              toggleCell(r, c);
+              r += delta.dr;
+              c += delta.dc;
+            }
+          }
+        };
+
+        if (hasWind && grid[tap.row][tap.col].wind === 1) {
+          toggleCell(tap.row, tap.col);
+          processWindQueue();
+          continue;
+        }
+
+        toggleCell(tap.row, tap.col);
+
+        for (let c = tap.col - 1; c >= 0; c--) {
+          if (isBlocked(tap.row, c)) {
+            break;
+          }
+          toggleCell(tap.row, c);
+        }
+
+        for (let c = tap.col + 1; c < gridSize; c++) {
+          if (isBlocked(tap.row, c)) {
+            break;
+          }
+          toggleCell(tap.row, c);
+        }
+
+        for (let r = tap.row - 1; r >= 0; r--) {
+          if (isBlocked(r, tap.col)) {
+            break;
+          }
+          toggleCell(r, tap.col);
+        }
+
+        for (let r = tap.row + 1; r < gridSize; r++) {
+          if (isBlocked(r, tap.col)) {
+            break;
+          }
+          toggleCell(r, tap.col);
+        }
+
+        processWindQueue();
+      }
+
+      return counts;
+    }
+
+    function verifyPuzzleSolution(grid, gridSize, solution, mechanic, blocks = null, winds = null) {
+      const counts = buildToggleCountsForMechanic(gridSize, solution, mechanic, blocks, winds);
+      const hasDots = mechanicHas(mechanic, 'dots');
+      for (let r = 0; r < gridSize; r++) {
+        for (let c = 0; c < gridSize; c++) {
+          const cell = grid[r][c];
+          const toggles = counts[r][c] % 2;
+          if ((cell.parity + toggles) % 2 !== 0) {
+            return false;
+          }
+          if (hasDots && cell.dot === 1 && counts[r][c] === 0) {
+            return false;
+          }
+        }
+      }
+      return true;
+    }
+
+    function buildBlockMask(gridSize, seed, count, forbiddenKeys = new Set()) {
+      const random = createSeededRandom(seed);
+      const blocks = [];
+      const used = new Set(forbiddenKeys);
+      let attempts = 0;
+
+      while (blocks.length < count && attempts < count * 40) {
         const r = Math.floor(random() * gridSize);
         const c = Math.floor(random() * gridSize);
         const key = `${r},${c}`;
         if (!used.has(key)) {
           used.add(key);
-          solution.push({ row: r, col: c });
+          blocks.push({ row: r, col: c });
         }
+        attempts++;
       }
 
-      // Apply taps to create the puzzle (toggle row and column for each tap)
-      for (const tap of solution) {
-        // Toggle entire row
+      return blocks;
+    }
+
+    function buildEchoLayout(gridSize, solution, seed) {
+      const random = createSeededRandom(seed);
+      const solutionKeys = new Set(solution.map(tap => `${tap.row},${tap.col}`));
+      const solutionRows = new Set(solution.map(tap => tap.row));
+      const solutionCols = new Set(solution.map(tap => tap.col));
+
+      const targetCount = Math.max(2, Math.min(gridSize + 1, Math.floor(gridSize * 0.6)));
+      const maxCount = Math.min(gridSize + 2, gridSize * gridSize - solution.length);
+
+      const candidates = [];
+      for (let r = 0; r < gridSize; r++) {
         for (let c = 0; c < gridSize; c++) {
-          grid[tap.row][c].parity = (grid[tap.row][c].parity + 1) % 2;
-        }
-        // Toggle entire column (except tapped cell, already done)
-        for (let r = 0; r < gridSize; r++) {
-          if (r !== tap.row) {
-            grid[r][tap.col].parity = (grid[r][tap.col].parity + 1) % 2;
+          const key = `${r},${c}`;
+          if (solutionKeys.has(key)) continue;
+          if (solutionRows.has(r) || solutionCols.has(c)) {
+            candidates.push({ row: r, col: c });
           }
         }
       }
 
-      return { grid, solution, tapsRequired: taps };
+      if (candidates.length === 0) return [];
+
+      for (let i = candidates.length - 1; i > 0; i--) {
+        const j = Math.floor(random() * (i + 1));
+        [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
+      }
+
+      const used = new Set();
+      const echoes = [];
+
+      const findSecondary = (primary) => {
+        const secondary = [];
+        for (let r = 0; r < gridSize; r++) {
+          for (let c = 0; c < gridSize; c++) {
+            const key = `${r},${c}`;
+            if (solutionKeys.has(key) || used.has(key)) continue;
+            if (solutionRows.has(r) || solutionCols.has(c)) continue;
+            if (r === primary.row || c === primary.col) {
+              secondary.push({ row: r, col: c });
+            }
+          }
+        }
+        if (secondary.length === 0) return null;
+        return secondary[Math.floor(random() * secondary.length)];
+      };
+
+      const chainTarget = Math.max(1, Math.floor(targetCount * 0.3));
+      let chains = 0;
+      for (const primary of candidates) {
+        if (chains >= chainTarget) break;
+        const key = `${primary.row},${primary.col}`;
+        if (used.has(key)) continue;
+        const secondary = findSecondary(primary);
+        if (!secondary) continue;
+        const secondaryKey = `${secondary.row},${secondary.col}`;
+        used.add(key);
+        used.add(secondaryKey);
+        echoes.push(primary, secondary);
+        chains++;
+      }
+
+      for (const candidate of candidates) {
+        if (echoes.length >= targetCount) break;
+        const key = `${candidate.row},${candidate.col}`;
+        if (used.has(key)) continue;
+        used.add(key);
+        echoes.push(candidate);
+      }
+
+      const hasEchoInRowCol = (tap) => {
+        return echoes.some(cell => cell.row === tap.row || cell.col === tap.col);
+      };
+
+      for (const tap of solution) {
+        if (hasEchoInRowCol(tap)) continue;
+        const options = [];
+        for (let r = 0; r < gridSize; r++) {
+          const key = `${r},${tap.col}`;
+          if (!solutionKeys.has(key) && !used.has(key)) {
+            options.push({ row: r, col: tap.col });
+          }
+        }
+        for (let c = 0; c < gridSize; c++) {
+          const key = `${tap.row},${c}`;
+          if (!solutionKeys.has(key) && !used.has(key)) {
+            options.push({ row: tap.row, col: c });
+          }
+        }
+        if (options.length > 0) {
+          const pick = options[Math.floor(random() * options.length)];
+          const key = `${pick.row},${pick.col}`;
+          used.add(key);
+          echoes.push(pick);
+        }
+      }
+
+      if (echoes.length > maxCount) {
+        const required = new Set();
+        for (const tap of solution) {
+          const match = echoes.find(cell => cell.row === tap.row || cell.col === tap.col);
+          if (match) required.add(`${match.row},${match.col}`);
+        }
+        const secondaryCandidates = echoes.filter(cell => {
+          if (solutionRows.has(cell.row) || solutionCols.has(cell.col)) return false;
+          return echoes.some(primary => (solutionRows.has(primary.row) || solutionCols.has(primary.col)) &&
+            (primary.row === cell.row || primary.col === cell.col));
+        });
+        if (secondaryCandidates.length > 0) {
+          const keep = secondaryCandidates[Math.floor(random() * secondaryCandidates.length)];
+          required.add(`${keep.row},${keep.col}`);
+        }
+
+        const removable = echoes.filter(cell => !required.has(`${cell.row},${cell.col}`));
+        for (let i = removable.length - 1; i >= 0 && echoes.length > maxCount; i--) {
+          const key = `${removable[i].row},${removable[i].col}`;
+          used.delete(key);
+          const idx = echoes.findIndex(cell => cell.row === removable[i].row && cell.col === removable[i].col);
+          if (idx !== -1) echoes.splice(idx, 1);
+        }
+      }
+
+      return echoes;
     }
 
-    // Generate 100 levels with increasing difficulty
-    function generateAllLevels() {
-      const levels = [];
-      let levelId = 1;
+    function buildWindLayout(gridSize, solution, seed) {
+      const random = createSeededRandom(seed);
+      const solutionKeys = new Set(solution.map(tap => `${tap.row},${tap.col}`));
+      const solutionList = solution.slice();
+      const candidates = [];
 
-      // Difficulty progression
-      const difficulties = [
-        // Levels 1-3: 3x3, 1 tap (quick tutorial)
-        ...Array(3).fill({ gridSize: 3, taps: 1 }),
-        // Levels 4-12: 3x3, 2 taps
-        ...Array(9).fill({ gridSize: 3, taps: 2 }),
-        // Levels 13-20: 3x3, 3 taps
-        ...Array(8).fill({ gridSize: 3, taps: 3 }),
-        // Levels 21-28: 4x4, 2 taps
-        ...Array(8).fill({ gridSize: 4, taps: 2 }),
-        // Levels 29-36: 4x4, 3 taps
-        ...Array(8).fill({ gridSize: 4, taps: 3 }),
-        // Levels 37-44: 4x4, 4 taps
-        ...Array(8).fill({ gridSize: 4, taps: 4 }),
-        // Levels 45-52: 5x5, 3 taps
-        ...Array(8).fill({ gridSize: 5, taps: 3 }),
-        // Levels 53-60: 5x5, 4 taps
-        ...Array(8).fill({ gridSize: 5, taps: 4 }),
-        // Levels 61-68: 6x6, 4 taps
-        ...Array(8).fill({ gridSize: 6, taps: 4 }),
-        // Levels 69-76: 6x6, 5 taps
-        ...Array(8).fill({ gridSize: 6, taps: 5 }),
-        // Levels 77-84: 7x7, 4 taps
-        ...Array(8).fill({ gridSize: 7, taps: 4 }),
-        // Levels 85-92: 7x7, 5 taps
-        ...Array(8).fill({ gridSize: 7, taps: 5 }),
-        // Levels 93-100: 7x7, 6 taps
-        ...Array(8).fill({ gridSize: 7, taps: 6 }),
+      for (let r = 0; r < gridSize; r++) {
+        for (let c = 0; c < gridSize; c++) {
+          const key = `${r},${c}`;
+          if (solutionKeys.has(key)) continue;
+          candidates.push({ row: r, col: c });
+        }
+      }
+
+      function shuffle(arr) {
+        for (let i = arr.length - 1; i > 0; i--) {
+          const j = Math.floor(random() * (i + 1));
+          [arr[i], arr[j]] = [arr[j], arr[i]];
+        }
+      }
+
+      shuffle(solutionList);
+      shuffle(candidates);
+
+      const targetCount = Math.max(2, Math.min(gridSize + 1, Math.floor(gridSize * 0.6)));
+      const winds = [];
+      const used = new Set();
+
+      const validWindDirs = (row, col) => {
+        const dirs = [];
+        if (row > 0) dirs.push(0);
+        if (col < gridSize - 1) dirs.push(1);
+        if (row < gridSize - 1) dirs.push(2);
+        if (col > 0) dirs.push(3);
+        return dirs;
+      };
+
+      const pickWindDir = (row, col) => {
+        const dirs = validWindDirs(row, col);
+        if (dirs.length === 0) return null;
+        return dirs[Math.floor(random() * dirs.length)];
+      };
+
+      if (solutionList.length > 0) {
+        const tap = solutionList[0];
+        const key = `${tap.row},${tap.col}`;
+        const dir = pickWindDir(tap.row, tap.col);
+        if (dir !== null) {
+          used.add(key);
+          winds.push({ row: tap.row, col: tap.col, dir });
+        }
+      }
+
+      const pool = solutionList.concat(candidates);
+      for (const cell of pool) {
+        if (winds.length >= targetCount) break;
+        const key = `${cell.row},${cell.col}`;
+        if (used.has(key)) continue;
+        const dir = pickWindDir(cell.row, cell.col);
+        if (dir === null) continue;
+        used.add(key);
+        winds.push({ row: cell.row, col: cell.col, dir });
+      }
+
+      if (winds.length > 1) {
+        const dirSet = new Set(winds.map(cell => cell.dir));
+        if (dirSet.size < 2) {
+          const altDirs = validWindDirs(winds[1].row, winds[1].col).filter(d => d !== winds[0].dir);
+          if (altDirs.length > 0) {
+            winds[1].dir = altDirs[Math.floor(random() * altDirs.length)];
+          }
+        }
+      }
+
+      return winds;
+    }
+
+    function analyzeEchoLayout(gridSize, solution, echoes) {
+      const solutionRows = new Set(solution.map(tap => tap.row));
+      const solutionCols = new Set(solution.map(tap => tap.col));
+      let tapsWithEcho = 0;
+      for (const tap of solution) {
+        if (echoes.some(cell => cell.row === tap.row || cell.col === tap.col)) {
+          tapsWithEcho++;
+        }
+      }
+
+      const primary = echoes.filter(cell => solutionRows.has(cell.row) || solutionCols.has(cell.col));
+      const secondary = echoes.filter(cell => !solutionRows.has(cell.row) && !solutionCols.has(cell.col))
+        .filter(cell => primary.some(p => p.row === cell.row || p.col === cell.col));
+
+      return {
+        coverage: solution.length ? tapsWithEcho / solution.length : 0,
+        chainCount: secondary.length,
+      };
+    }
+
+    function applyTapToGrid(grid, row, col, gridSize, mechanic, blockMask, echoState) {
+      const hasBlocks = mechanicHas(mechanic, 'blocks');
+      const hasWind = mechanicHas(mechanic, 'wind');
+      const hasEcho = mechanicHas(mechanic, 'echo');
+      const isBlocked = (r, c) => {
+        if (!blockMask) return false;
+        return blockMask.some(cell => cell.row === r && cell.col === c);
+      };
+
+      const isEcho = (r, c) => {
+        if (!hasEcho) return false;
+        if (echoState) {
+          return echoState.remaining.has(`${r},${c}`);
+        }
+        return grid[r][c].echo === 1;
+      };
+
+      if (hasBlocks && isBlocked(row, col)) {
+        return;
+      }
+
+      const windQueue = [];
+      const queueWind = (r, c) => {
+        if (!hasWind) return;
+        if (grid[r][c].wind !== 1) return;
+        const dir = grid[r][c].windDir;
+        grid[r][c].wind = 0;
+        grid[r][c].windDir = 0;
+        windQueue.push({ row: r, col: c, dir });
+      };
+
+      const toggleCell = (r, c) => {
+        grid[r][c].parity = (grid[r][c].parity + 1) % 2;
+        queueWind(r, c);
+      };
+
+      const processWindQueue = () => {
+        if (!hasWind) return;
+        const deltas = [
+          { dr: -1, dc: 0 },
+          { dr: 0, dc: 1 },
+          { dr: 1, dc: 0 },
+          { dr: 0, dc: -1 },
+        ];
+        while (windQueue.length) {
+          const wind = windQueue.shift();
+          const delta = deltas[wind.dir] || deltas[0];
+          let r = wind.row + delta.dr;
+          let c = wind.col + delta.dc;
+          while (r >= 0 && r < gridSize && c >= 0 && c < gridSize) {
+            if (hasBlocks && isBlocked(r, c)) {
+              break;
+            }
+            toggleCell(r, c);
+            r += delta.dr;
+            c += delta.dc;
+          }
+        }
+      };
+
+      const triggeredEcho = new Set();
+      const tapQueue = [{ row, col }];
+
+      while (tapQueue.length) {
+        const tap = tapQueue.shift();
+
+        if (hasBlocks && isBlocked(tap.row, tap.col)) {
+          continue;
+        }
+
+        const maybeQueueEcho = (r, c) => {
+          if (!hasEcho) return;
+          if (!isEcho(r, c)) return;
+          const key = `${r},${c}`;
+          if (triggeredEcho.has(key)) return;
+          triggeredEcho.add(key);
+          if (echoState) {
+            echoState.remaining.delete(key);
+            if (echoState.consumeGrid) {
+              grid[r][c].echo = 0;
+            }
+          } else {
+            grid[r][c].echo = 0;
+          }
+          tapQueue.push({ row: r, col: c });
+        };
+
+        if (hasWind && grid[tap.row][tap.col].wind === 1) {
+          toggleCell(tap.row, tap.col);
+          processWindQueue();
+          continue;
+        }
+
+        const toggleRowWithBlocks = () => {
+          toggleCell(tap.row, tap.col);
+          maybeQueueEcho(tap.row, tap.col);
+
+          for (let c = tap.col - 1; c >= 0; c--) {
+            if (hasBlocks && isBlocked(tap.row, c)) {
+              break;
+            }
+            toggleCell(tap.row, c);
+            maybeQueueEcho(tap.row, c);
+          }
+
+          for (let c = tap.col + 1; c < gridSize; c++) {
+            if (hasBlocks && isBlocked(tap.row, c)) {
+              break;
+            }
+            toggleCell(tap.row, c);
+            maybeQueueEcho(tap.row, c);
+          }
+        };
+
+        const toggleColumnWithBlocks = () => {
+          for (let r = tap.row - 1; r >= 0; r--) {
+            if (hasBlocks && isBlocked(r, tap.col)) {
+              break;
+            }
+            toggleCell(r, tap.col);
+            maybeQueueEcho(r, tap.col);
+          }
+
+          for (let r = tap.row + 1; r < gridSize; r++) {
+            if (hasBlocks && isBlocked(r, tap.col)) {
+              break;
+            }
+            toggleCell(r, tap.col);
+            maybeQueueEcho(r, tap.col);
+          }
+        };
+
+        toggleRowWithBlocks();
+        toggleColumnWithBlocks();
+        processWindQueue();
+      }
+    }
+
+    function applyDotsToGrid(grid, gridSize, solution, seed, mechanic = 'dots', blocks = null, winds = null) {
+      const random = createSeededRandom(seed);
+      const toggleCounts = buildToggleCountsForMechanic(gridSize, solution, mechanic, blocks, winds);
+      const candidates = [];
+      const parityZero = [];
+      const parityOne = [];
+
+      for (let r = 0; r < gridSize; r++) {
+        for (let c = 0; c < gridSize; c++) {
+          if (toggleCounts[r][c] > 0) {
+            const entry = { row: r, col: c };
+            candidates.push(entry);
+            if (grid[r][c].parity === 0) {
+              parityZero.push(entry);
+            } else {
+              parityOne.push(entry);
+            }
+          }
+        }
+      }
+
+      if (candidates.length === 0) return 0;
+
+      const maxDots = Math.min(candidates.length, Math.floor(gridSize * gridSize * 0.5));
+      let dotCount = Math.floor(gridSize * gridSize * 0.18 + solution.length * 0.6);
+      dotCount = Math.max(3, Math.min(dotCount, maxDots));
+
+      function shuffle(arr) {
+        for (let i = arr.length - 1; i > 0; i--) {
+          const j = Math.floor(random() * (i + 1));
+          [arr[i], arr[j]] = [arr[j], arr[i]];
+        }
+      }
+
+      shuffle(parityZero);
+      shuffle(parityOne);
+
+      let zeroTarget = Math.min(parityZero.length, Math.round(dotCount * 0.6));
+      let oneTarget = Math.min(parityOne.length, dotCount - zeroTarget);
+      if (zeroTarget + oneTarget < dotCount) {
+        const remaining = dotCount - (zeroTarget + oneTarget);
+        const extraZero = Math.min(parityZero.length - zeroTarget, remaining);
+        zeroTarget += extraZero;
+        oneTarget = Math.min(parityOne.length, dotCount - zeroTarget);
+      }
+
+      const chosen = [];
+      chosen.push(...parityZero.slice(0, zeroTarget));
+      chosen.push(...parityOne.slice(0, oneTarget));
+
+      while (chosen.length < dotCount && candidates.length > chosen.length) {
+        const idx = Math.floor(random() * candidates.length);
+        const cell = candidates[idx];
+        if (!chosen.some(c => c.row === cell.row && c.col === cell.col)) {
+          chosen.push(cell);
+        }
+      }
+
+      for (const cell of chosen) {
+        grid[cell.row][cell.col].dot = 1;
+      }
+
+      return chosen.length;
+    }
+
+    function gridSignatureBigInt(grid) {
+      let bits = 0n;
+      let idx = 0n;
+      for (let r = 0; r < grid.length; r++) {
+        for (let c = 0; c < grid[r].length; c++) {
+          if (grid[r][c].parity === 1) {
+            bits |= (1n << idx);
+          }
+          idx++;
+        }
+      }
+      return bits;
+    }
+
+    function blockSignatureBigInt(blocks, gridSize) {
+      let bits = 0n;
+      for (const block of blocks) {
+        const idx = BigInt(block.row * gridSize + block.col);
+        bits |= (1n << idx);
+      }
+      return bits;
+    }
+
+    function echoSignatureBigInt(echoes, gridSize) {
+      let bits = 0n;
+      for (const cell of echoes) {
+        const idx = BigInt(cell.row * gridSize + cell.col);
+        bits |= (1n << idx);
+      }
+      return bits;
+    }
+
+    function windSignatureKey(winds, gridSize) {
+      const dirs = [0n, 0n, 0n, 0n];
+      for (const cell of winds) {
+        const idx = BigInt(cell.row * gridSize + cell.col);
+        const dir = cell.dir % 4;
+        dirs[dir] |= (1n << idx);
+      }
+      return dirs.join('|');
+    }
+
+    function canonicalSignature(grid) {
+      const n = grid.length;
+      const parity = (r, c) => grid[r][c].parity;
+      const transforms = [
+        (r, c, size) => [r, c],
+        (r, c, size) => [c, size - 1 - r],
+        (r, c, size) => [size - 1 - r, size - 1 - c],
+        (r, c, size) => [size - 1 - c, r],
+        (r, c, size) => [r, size - 1 - c],
+        (r, c, size) => [size - 1 - r, c],
+        (r, c, size) => [c, r],
+        (r, c, size) => [size - 1 - c, size - 1 - r],
       ];
 
-      for (let i = 0; i < 100; i++) {
+      let best = null;
+      for (const transform of transforms) {
+        let signature = '';
+        for (let r = 0; r < n; r++) {
+          for (let c = 0; c < n; c++) {
+            const [or, oc] = transform(r, c, n);
+            signature += parity(or, oc);
+          }
+        }
+        if (best === null || signature < best) {
+          best = signature;
+        }
+      }
+      return best || '';
+    }
+
+    const DIR_VECTORS = [
+      { dr: -1, dc: 0 },
+      { dr: 0, dc: 1 },
+      { dr: 1, dc: 0 },
+      { dr: 0, dc: -1 },
+    ];
+
+    function dirFromDelta(dr, dc) {
+      if (dr === -1 && dc === 0) return 0;
+      if (dr === 0 && dc === 1) return 1;
+      if (dr === 1 && dc === 0) return 2;
+      if (dr === 0 && dc === -1) return 3;
+      return 0;
+    }
+
+    function canonicalPuzzleSignature(grid) {
+      const n = grid.length;
+      const transforms = [
+        (r, c, size) => [r, c],
+        (r, c, size) => [c, size - 1 - r],
+        (r, c, size) => [size - 1 - r, size - 1 - c],
+        (r, c, size) => [size - 1 - c, r],
+        (r, c, size) => [r, size - 1 - c],
+        (r, c, size) => [size - 1 - r, c],
+        (r, c, size) => [c, r],
+        (r, c, size) => [size - 1 - c, size - 1 - r],
+      ];
+
+      const anchor = n > 2 ? 1 : 0;
+      let best = null;
+      for (const transform of transforms) {
+        const parity = new Array(n * n);
+        const dots = new Array(n * n);
+        const blocks = new Array(n * n);
+        const echoes = new Array(n * n);
+        const winds = new Array(n * n);
+
+        const dirMap = DIR_VECTORS.map(({ dr, dc }) => {
+          const [r1, c1] = transform(anchor, anchor, n);
+          const [r2, c2] = transform(anchor + dr, anchor + dc, n);
+          return dirFromDelta(r2 - r1, c2 - c1);
+        });
+
+        for (let r = 0; r < n; r++) {
+          for (let c = 0; c < n; c++) {
+            const [tr, tc] = transform(r, c, n);
+            const idx = tr * n + tc;
+            const cell = grid[r][c];
+            parity[idx] = cell.parity === 1 ? '1' : '0';
+            dots[idx] = cell.dot === 1 ? '1' : '0';
+            blocks[idx] = cell.block === 1 ? '1' : '0';
+            echoes[idx] = cell.echo === 1 ? '1' : '0';
+            if (cell.wind === 1) {
+              const mapped = dirMap[cell.windDir % 4];
+              winds[idx] = String(mapped);
+            } else {
+              winds[idx] = 'n';
+            }
+          }
+        }
+
+        const signature = `${parity.join('')}|${dots.join('')}|${blocks.join('')}|${echoes.join('')}|${winds.join('')}`;
+        if (best === null || signature < best) {
+          best = signature;
+        }
+      }
+      return best || '';
+    }
+
+    function buildTrivialSignatureSets(maxTaps) {
+      const setsBySize = {};
+      for (let gridSize = 3; gridSize <= 7; gridSize++) {
+        const sets = Array.from({ length: maxTaps + 1 }, () => new Set());
+        const total = gridSize * gridSize;
+
+        if (maxTaps >= 1) {
+          for (let i = 0; i < total; i++) {
+            const taps = [{ row: Math.floor(i / gridSize), col: i % gridSize }];
+            const grid = buildGridFromSolution(gridSize, taps);
+            sets[1].add(gridSignatureBigInt(grid));
+          }
+        }
+
+        if (maxTaps >= 2) {
+          for (let i = 0; i < total - 1; i++) {
+            for (let j = i + 1; j < total; j++) {
+              const taps = [
+                { row: Math.floor(i / gridSize), col: i % gridSize },
+                { row: Math.floor(j / gridSize), col: j % gridSize },
+              ];
+              const grid = buildGridFromSolution(gridSize, taps);
+              sets[2].add(gridSignatureBigInt(grid));
+            }
+          }
+        }
+
+        if (maxTaps >= 3) {
+          for (let i = 0; i < total - 2; i++) {
+            for (let j = i + 1; j < total - 1; j++) {
+              for (let k = j + 1; k < total; k++) {
+                const taps = [
+                  { row: Math.floor(i / gridSize), col: i % gridSize },
+                  { row: Math.floor(j / gridSize), col: j % gridSize },
+                  { row: Math.floor(k / gridSize), col: k % gridSize },
+                ];
+                const grid = buildGridFromSolution(gridSize, taps);
+                sets[3].add(gridSignatureBigInt(grid));
+              }
+            }
+          }
+        }
+
+        setsBySize[gridSize] = sets;
+      }
+      return setsBySize;
+    }
+
+    const TRIVIAL_SETS = buildTrivialSignatureSets(3);
+
+    function hasTrivialAlternative(gridSize, signature, tapsRequired) {
+      const maxCheck = Math.min(3, tapsRequired - 1);
+      if (maxCheck < 1) return false;
+      const sets = TRIVIAL_SETS[gridSize];
+      for (let k = 1; k <= maxCheck; k++) {
+        if (sets[k].has(signature)) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    const placementStrategies = {
+      random: (random, gridSize, taps) => {
+        const solution = [];
+        const used = new Set();
+        while (solution.length < taps) {
+          const r = Math.floor(random() * gridSize);
+          const c = Math.floor(random() * gridSize);
+          const key = `${r},${c}`;
+          if (!used.has(key)) {
+            used.add(key);
+            solution.push({ row: r, col: c });
+          }
+        }
+        return solution;
+      },
+
+      scattered: (random, gridSize, taps) => {
+        const solution = [];
+        const used = new Set();
+        const regions = [];
+        const regionSize = Math.max(2, Math.floor(gridSize / Math.ceil(Math.sqrt(taps))));
+        for (let r = 0; r < gridSize; r += regionSize) {
+          for (let c = 0; c < gridSize; c += regionSize) {
+            regions.push({ r, c, size: regionSize });
+          }
+        }
+        for (let i = regions.length - 1; i > 0; i--) {
+          const j = Math.floor(random() * (i + 1));
+          [regions[i], regions[j]] = [regions[j], regions[i]];
+        }
+        let regionIdx = 0;
+        while (solution.length < taps) {
+          const region = regions[regionIdx % regions.length];
+          const r = region.r + Math.floor(random() * Math.min(region.size, gridSize - region.r));
+          const c = region.c + Math.floor(random() * Math.min(region.size, gridSize - region.c));
+          const key = `${r},${c}`;
+          if (!used.has(key)) {
+            used.add(key);
+            solution.push({ row: r, col: c });
+          }
+          regionIdx++;
+          if (regionIdx > taps * 10) break;
+        }
+        while (solution.length < taps) {
+          const r = Math.floor(random() * gridSize);
+          const c = Math.floor(random() * gridSize);
+          const key = `${r},${c}`;
+          if (!used.has(key)) {
+            used.add(key);
+            solution.push({ row: r, col: c });
+          }
+        }
+        return solution;
+      },
+
+      diagonalBias: (random, gridSize, taps) => {
+        const solution = [];
+        const used = new Set();
+        let attempts = 0;
+        while (solution.length < taps && attempts < taps * 30) {
+          let r, c;
+          if (random() < 0.65) {
+            const diag = Math.floor(random() * gridSize);
+            const offset = Math.floor(random() * 3) - 1;
+            r = Math.max(0, Math.min(gridSize - 1, diag));
+            c = Math.max(0, Math.min(gridSize - 1, diag + offset));
+          } else {
+            r = Math.floor(random() * gridSize);
+            c = Math.floor(random() * gridSize);
+          }
+          const key = `${r},${c}`;
+          if (!used.has(key)) {
+            used.add(key);
+            solution.push({ row: r, col: c });
+          }
+          attempts++;
+        }
+        while (solution.length < taps) {
+          const r = Math.floor(random() * gridSize);
+          const c = Math.floor(random() * gridSize);
+          const key = `${r},${c}`;
+          if (!used.has(key)) {
+            used.add(key);
+            solution.push({ row: r, col: c });
+          }
+        }
+        return solution;
+      },
+
+      cornerWeighted: (random, gridSize, taps) => {
+        const solution = [];
+        const used = new Set();
+        const cornerCells = [];
+        const cornerSize = Math.min(2, gridSize);
+        for (let r = 0; r < cornerSize; r++) {
+          for (let c = 0; c < cornerSize; c++) {
+            cornerCells.push([r, c]);
+            cornerCells.push([r, gridSize - 1 - c]);
+            cornerCells.push([gridSize - 1 - r, c]);
+            cornerCells.push([gridSize - 1 - r, gridSize - 1 - c]);
+          }
+        }
+        while (solution.length < taps) {
+          let r, c;
+          if (random() < 0.6 && cornerCells.length > 0) {
+            const idx = Math.floor(random() * cornerCells.length);
+            [r, c] = cornerCells[idx];
+          } else {
+            r = Math.floor(random() * gridSize);
+            c = Math.floor(random() * gridSize);
+          }
+          const key = `${r},${c}`;
+          if (!used.has(key)) {
+            used.add(key);
+            solution.push({ row: r, col: c });
+          }
+        }
+        return solution;
+      },
+
+      edgeRing: (random, gridSize, taps) => {
+        const solution = [];
+        const used = new Set();
+        const edgeCells = [];
+        for (let i = 0; i < gridSize; i++) {
+          edgeCells.push([0, i], [gridSize - 1, i]);
+          if (i > 0 && i < gridSize - 1) {
+            edgeCells.push([i, 0], [i, gridSize - 1]);
+          }
+        }
+        let attempts = 0;
+        while (solution.length < taps && attempts < taps * 20) {
+          let r, c;
+          if (random() < 0.7) {
+            const idx = Math.floor(random() * edgeCells.length);
+            [r, c] = edgeCells[idx];
+          } else {
+            r = Math.floor(random() * gridSize);
+            c = Math.floor(random() * gridSize);
+          }
+          const key = `${r},${c}`;
+          if (!used.has(key)) {
+            used.add(key);
+            solution.push({ row: r, col: c });
+          }
+          attempts++;
+        }
+        while (solution.length < taps) {
+          const r = Math.floor(random() * gridSize);
+          const c = Math.floor(random() * gridSize);
+          const key = `${r},${c}`;
+          if (!used.has(key)) {
+            used.add(key);
+            solution.push({ row: r, col: c });
+          }
+        }
+        return solution;
+      },
+
+      centerCluster: (random, gridSize, taps) => {
+        const solution = [];
+        const used = new Set();
+        const center = (gridSize - 1) / 2;
+        let attempts = 0;
+        while (solution.length < taps && attempts < taps * 40) {
+          const r = Math.round((random() + random()) / 2 * (gridSize - 1));
+          const c = Math.round((random() + random()) / 2 * (gridSize - 1));
+          const dr = Math.abs(r - center);
+          const dc = Math.abs(c - center);
+          if (random() < 0.8 - (dr + dc) / (gridSize * 1.5)) {
+            const key = `${r},${c}`;
+            if (!used.has(key)) {
+              used.add(key);
+              solution.push({ row: r, col: c });
+            }
+          }
+          attempts++;
+        }
+        while (solution.length < taps) {
+          const r = Math.floor(random() * gridSize);
+          const c = Math.floor(random() * gridSize);
+          const key = `${r},${c}`;
+          if (!used.has(key)) {
+            used.add(key);
+            solution.push({ row: r, col: c });
+          }
+        }
+        return solution;
+      },
+    };
+
+    function generateEchoPuzzle(gridSize, taps, seed, usedSignatures) {
+      const random = createSeededRandom(seed);
+      const strategyNames = Object.keys(placementStrategies);
+      let best = null;
+      const attempts = 240;
+
+      for (let i = 0; i < attempts; i++) {
+        const strategy = strategyNames[i % strategyNames.length];
+        const solution = placementStrategies[strategy](random, gridSize, taps);
+        if (solution.length !== taps) continue;
+
+        const echoes = buildEchoLayout(gridSize, solution, seed + i * 733);
+        if (echoes.length === 0) continue;
+
+        const analysis = analyzeEchoLayout(gridSize, solution, echoes);
+        const minCoverage = gridSize <= 3 ? 0.5 : 0.6;
+        if (analysis.coverage < minCoverage) continue;
+        if (gridSize >= 4 && analysis.chainCount === 0 && i < attempts * 0.7) continue;
+
+        const grid = buildGridFromSolution(gridSize, solution, { mechanic: 'echo', echoCells: echoes });
+        const gridNoEcho = buildGridFromSolution(gridSize, solution, { mechanic: 'classic' });
+        if (gridSignatureBigInt(grid) === gridSignatureBigInt(gridNoEcho)) continue;
+        const signature = canonicalPuzzleSignature(grid);
+        if (usedSignatures.has(signature)) continue;
+        const rawSignature = gridSignatureBigInt(grid);
+        if (hasTrivialAlternative(gridSize, rawSignature, taps)) continue;
+
+        let score = scorePuzzleInterestingness(grid, solution, gridSize);
+        score += analysis.coverage * 18;
+        score += Math.min(10, analysis.chainCount * 2);
+        if (!best || score > best.score) {
+          best = { grid, solution, score, signature, echoes };
+        }
+      }
+
+      if (!best) return null;
+      usedSignatures.add(best.signature);
+      return { grid: best.grid, solution: best.solution, tapsRequired: taps, echoes: best.echoes || [] };
+    }
+
+    function generateComboPuzzle(gridSize, taps, seed, usedSignatures, mechanic) {
+      const random = createSeededRandom(seed);
+      const strategyNames = Object.keys(placementStrategies);
+      let best = null;
+      const attempts = 240;
+      const hasBlocks = mechanicHas(mechanic, 'blocks');
+      const hasWind = mechanicHas(mechanic, 'wind');
+      const hasDots = mechanicHas(mechanic, 'dots');
+
+      for (let i = 0; i < attempts; i++) {
+        const strategy = strategyNames[i % strategyNames.length];
+        let blocks = null;
+        if (hasBlocks) {
+          const blockCount = Math.max(1, Math.min(gridSize + 1, Math.floor(gridSize * 0.7)));
+          const blockSeed = seed + i * 97;
+          blocks = buildBlockMask(gridSize, blockSeed, blockCount);
+        }
+
+        const solution = placementStrategies[strategy](random, gridSize, taps);
+        if (solution.length !== taps) continue;
+        if (blocks && solution.some(tap => blocks.some(block => block.row === tap.row && block.col === tap.col))) {
+          continue;
+        }
+
+        const winds = hasWind ? buildWindLayout(gridSize, solution, seed + i * 619) : null;
+        if (hasWind && (!winds || winds.length === 0)) continue;
+
+        const grid = buildGridFromSolution(gridSize, solution, { mechanic, blocks, windCells: winds });
+
+        let dotsApplied = false;
+        if (hasDots) {
+          applyDotsToGrid(grid, gridSize, solution, seed + i * 424242, mechanic, blocks, winds);
+          dotsApplied = true;
+        }
+
+        if (!verifyPuzzleSolution(grid, gridSize, solution, mechanic, blocks, winds)) {
+          continue;
+        }
+
+        const signature = canonicalPuzzleSignature(grid);
+        if (usedSignatures.has(signature)) continue;
+        const rawSignature = gridSignatureBigInt(grid);
+        if (hasTrivialAlternative(gridSize, rawSignature, taps)) continue;
+
+        let score = scorePuzzleInterestingness(grid, solution, gridSize);
+        if (hasWind && winds) {
+          const uniqueDirs = new Set(winds.map(cell => cell.dir)).size;
+          score += Math.min(10, uniqueDirs * 2);
+        }
+        if (!best || score > best.score) {
+          best = { grid, solution, score, signature, blocks, winds, dotsApplied };
+        }
+      }
+
+      if (!best) return null;
+      usedSignatures.add(best.signature);
+      return {
+        grid: best.grid,
+        solution: best.solution,
+        tapsRequired: taps,
+        blocks: best.blocks || [],
+        winds: best.winds || [],
+        dotsApplied: !!best.dotsApplied,
+      };
+    }
+
+    function generateWindPuzzle(gridSize, taps, seed, usedSignatures) {
+      const random = createSeededRandom(seed);
+      const strategyNames = Object.keys(placementStrategies);
+      let best = null;
+      const attempts = 240;
+
+      for (let i = 0; i < attempts; i++) {
+        const strategy = strategyNames[i % strategyNames.length];
+        const solution = placementStrategies[strategy](random, gridSize, taps);
+        if (solution.length !== taps) continue;
+
+        const winds = buildWindLayout(gridSize, solution, seed + i * 619);
+        if (winds.length === 0) continue;
+
+        const grid = buildGridFromSolution(gridSize, solution, { mechanic: 'wind', windCells: winds });
+        const gridNoWind = buildGridFromSolution(gridSize, solution, { mechanic: 'classic' });
+        if (gridSignatureBigInt(grid) === gridSignatureBigInt(gridNoWind)) continue;
+        const signature = canonicalPuzzleSignature(grid);
+        if (usedSignatures.has(signature)) continue;
+        const rawSignature = gridSignatureBigInt(grid);
+        if (hasTrivialAlternative(gridSize, rawSignature, taps)) continue;
+
+        let score = scorePuzzleInterestingness(grid, solution, gridSize);
+        const uniqueDirs = new Set(winds.map(cell => cell.dir)).size;
+        score += Math.min(10, uniqueDirs * 2);
+        if (!best || score > best.score) {
+          best = { grid, solution, score, signature, winds };
+        }
+      }
+
+      if (!best) return null;
+      usedSignatures.add(best.signature);
+      return { grid: best.grid, solution: best.solution, tapsRequired: taps, winds: best.winds || [] };
+    }
+
+    function generatePuzzle(gridSize, taps, seed, usedSignatures, mechanic = 'classic') {
+      if (mechanicHas(mechanic, 'echo') && !mechanicHas(mechanic, 'blocks') && !mechanicHas(mechanic, 'wind') && !mechanicHas(mechanic, 'dots')) {
+        return generateEchoPuzzle(gridSize, taps, seed, usedSignatures);
+      }
+      if (mechanicHas(mechanic, 'wind') || mechanicHas(mechanic, 'blocks') || mechanicHas(mechanic, 'dots')) {
+        return generateComboPuzzle(gridSize, taps, seed, usedSignatures, mechanic);
+      }
+      if (mechanic === 'wind') {
+        return generateWindPuzzle(gridSize, taps, seed, usedSignatures);
+      }
+      if (mechanic === 'echo') {
+        return generateEchoPuzzle(gridSize, taps, seed, usedSignatures);
+      }
+      const random = createSeededRandom(seed);
+      const strategyNames = Object.keys(placementStrategies);
+      let best = null;
+      const attempts = 240;
+
+      for (let i = 0; i < attempts; i++) {
+        const strategy = strategyNames[i % strategyNames.length];
+        let blocks = null;
+        if (mechanic === 'blocks') {
+          const blockCount = Math.max(1, Math.min(gridSize + 1, Math.floor(gridSize * 0.7)));
+          const blockSeed = seed + i * 97;
+          blocks = buildBlockMask(gridSize, blockSeed, blockCount);
+        }
+
+        const solution = placementStrategies[strategy](random, gridSize, taps);
+        if (solution.length !== taps) continue;
+        if (blocks && solution.some(tap => blocks.some(block => block.row === tap.row && block.col === tap.col))) {
+          continue;
+        }
+        const grid = buildGridFromSolution(gridSize, solution, { mechanic, blocks });
+        const signature = canonicalPuzzleSignature(grid);
+        if (usedSignatures.has(signature)) continue;
+        const rawSignature = gridSignatureBigInt(grid);
+        if (hasTrivialAlternative(gridSize, rawSignature, taps)) continue;
+
+        const score = scorePuzzleInterestingness(grid, solution, gridSize);
+        if (!best || score > best.score) {
+          best = { grid, solution, score, signature, blocks };
+        }
+      }
+
+      if (!best) return null;
+      usedSignatures.add(best.signature);
+      return { grid: best.grid, solution: best.solution, tapsRequired: taps, blocks: best.blocks || [] };
+    }
+
+    const PACK_LEVEL_COUNT = 90;
+    const BASE_DIFFICULTIES = [
+      ...Array(2).fill({ gridSize: 3, taps: 1 }),
+      ...Array(4).fill({ gridSize: 3, taps: 2 }),
+      ...Array(4).fill({ gridSize: 3, taps: 3 }),
+      ...Array(5).fill({ gridSize: 4, taps: 2 }),
+      ...Array(5).fill({ gridSize: 4, taps: 3 }),
+      ...Array(5).fill({ gridSize: 4, taps: 4 }),
+      ...Array(5).fill({ gridSize: 5, taps: 3 }),
+      ...Array(5).fill({ gridSize: 5, taps: 4 }),
+      ...Array(5).fill({ gridSize: 5, taps: 5 }),
+      ...Array(5).fill({ gridSize: 6, taps: 4 }),
+      ...Array(5).fill({ gridSize: 6, taps: 5 }),
+      ...Array(5).fill({ gridSize: 7, taps: 5 }),
+      ...Array(5).fill({ gridSize: 7, taps: 6 }),
+      ...Array(5).fill({ gridSize: 6, taps: 6 }),
+      ...Array(5).fill({ gridSize: 6, taps: 7 }),
+      ...Array(5).fill({ gridSize: 7, taps: 7 }),
+      ...Array(5).fill({ gridSize: 7, taps: 8 }),
+      ...Array(5).fill({ gridSize: 7, taps: 9 }),
+      ...Array(5).fill({ gridSize: 5, taps: 6 }),
+    ];
+
+    const MECHANIC_LABELS = {
+      classic: 'Core',
+      dots: 'Fire',
+      blocks: 'Earth',
+      wind: 'Wind',
+      'dots+wind': 'Fire + Wind',
+      'dots+blocks': 'Fire + Earth',
+      'blocks+wind': 'Earth + Wind',
+    };
+
+    const PACK_DEFS = [
+      { id: 'classic', title: 'Core', subtitle: 'Pure parity', mechanic: 'classic', palette: 0 },
+      { id: 'dots', title: 'Fire', subtitle: 'Extinguish embers', mechanic: 'dots', palette: 1 },
+      { id: 'blocks', title: 'Earth', subtitle: 'Rock stops flips', mechanic: 'blocks', palette: 2 },
+      { id: 'wind', title: 'Wind', subtitle: 'Directional flow', mechanic: 'wind', palette: 3 },
+      { id: 'fire_wind', title: 'Fire + Wind', subtitle: 'Embers ride the gust', mechanic: 'dots+wind', palette: 4 },
+      { id: 'fire_earth', title: 'Fire + Earth', subtitle: 'Embers meet stone', mechanic: 'dots+blocks', palette: 5 },
+      { id: 'earth_wind', title: 'Earth + Wind', subtitle: 'Gusts meet stone', mechanic: 'blocks+wind', palette: 6 },
+    ];
+
+    function generatePackLevels(packIndex, packDef) {
+      const levels = [];
+      const usedSignatures = new Set();
+      const difficulties = BASE_DIFFICULTIES.slice(0, PACK_LEVEL_COUNT);
+
+      for (let i = 0; i < difficulties.length; i++) {
         const { gridSize, taps } = difficulties[i];
-        const seed = 12345 + i * 777; // Consistent seeds for reproducible puzzles
-        const puzzle = generatePuzzle(gridSize, taps, seed);
+        const baseSeed = 4242 + packIndex * 10000 + i * 131;
+        let puzzle = null;
+        for (let attempt = 0; attempt < 6 && !puzzle; attempt++) {
+          puzzle = generatePuzzle(gridSize, taps, baseSeed + attempt * 10007, usedSignatures, packDef.mechanic);
+        }
+
+        if (!puzzle) {
+          puzzle = generatePuzzle(gridSize, taps, baseSeed + 77777, usedSignatures, packDef.mechanic);
+        }
+
+        if (!puzzle) {
+          for (let fallbackAttempt = 0; fallbackAttempt < 6; fallbackAttempt++) {
+            const fallbackSeed = baseSeed + 99999 + fallbackAttempt * 911;
+            const fallbackRandom = createSeededRandom(fallbackSeed);
+            const solution = placementStrategies.random(fallbackRandom, gridSize, taps);
+            const blocks = mechanicHas(packDef.mechanic, 'blocks')
+              ? buildBlockMask(gridSize, fallbackSeed + 12345, Math.max(1, Math.min(gridSize + 1, Math.floor(gridSize * 0.7))))
+              : null;
+            const winds = mechanicHas(packDef.mechanic, 'wind')
+              ? buildWindLayout(gridSize, solution, fallbackSeed + 31415)
+              : null;
+            const grid = buildGridFromSolution(gridSize, solution, { mechanic: packDef.mechanic, blocks, windCells: winds });
+            const candidate = { grid, solution, tapsRequired: taps, blocks: blocks || [], winds: winds || [], needsSignature: true };
+            if (mechanicHas(packDef.mechanic, 'dots')) {
+              applyDotsToGrid(candidate.grid, gridSize, solution, fallbackSeed + 424242, packDef.mechanic, candidate.blocks, candidate.winds);
+              candidate.dotsApplied = true;
+            }
+            if (mechanicHas(packDef.mechanic, 'wind')) {
+              if (!candidate.winds || candidate.winds.length === 0) {
+                candidate.winds = buildWindLayout(gridSize, solution, fallbackSeed + 51515);
+              }
+            }
+            if (verifyPuzzleSolution(candidate.grid, gridSize, solution, packDef.mechanic, candidate.blocks, candidate.winds)) {
+              puzzle = candidate;
+              break;
+            }
+          }
+        }
+
+        let hasDots = mechanicHas(packDef.mechanic, 'dots');
+        if (hasDots && !puzzle.dotsApplied) {
+          applyDotsToGrid(puzzle.grid, gridSize, puzzle.solution, baseSeed + 424242, packDef.mechanic, puzzle.blocks || [], puzzle.winds || []);
+        }
+        if (mechanicHas(packDef.mechanic, 'wind')) {
+          if (!puzzle.winds || puzzle.winds.length === 0) {
+            puzzle.winds = buildWindLayout(gridSize, puzzle.solution, baseSeed + 51515);
+          }
+        }
+        if (!verifyPuzzleSolution(puzzle.grid, gridSize, puzzle.solution, packDef.mechanic, puzzle.blocks || [], puzzle.winds || [])) {
+          puzzle = null;
+          i -= 1;
+          continue;
+        }
+        if (puzzle.needsSignature) {
+          const signature = canonicalPuzzleSignature(puzzle.grid);
+          if (!usedSignatures.has(signature)) {
+            usedSignatures.add(signature);
+          }
+          puzzle.needsSignature = false;
+        }
 
         levels.push({
-          id: levelId++,
+          id: i + 1,
           gridSize,
-          palette: i % PALETTES.length,
+          palette: (packDef.palette + i) % PALETTES.length,
           initial: puzzle.grid,
           solution: puzzle.solution,
           tapsRequired: puzzle.tapsRequired,
+          hasDots,
+          mechanic: packDef.mechanic,
+          blocks: puzzle.blocks || [],
+          winds: puzzle.winds || [],
         });
       }
 
       return levels;
     }
 
-    const LEVELS = generateAllLevels();
+    function generateAllPacks() {
+      return PACK_DEFS.map((packDef, packIndex) => ({
+        ...packDef,
+        levels: generatePackLevels(packIndex, packDef),
+      }));
+    }
+
+    const PACKS = generateAllPacks();
+
+    const DAILY_MECHANICS = Array.from(new Set(PACK_DEFS.map(pack => pack.mechanic)));
+    const DAILY_DIFFICULTIES = [
+      { gridSize: 3, taps: 2 },
+      { gridSize: 4, taps: 3 },
+      { gridSize: 4, taps: 4 },
+      { gridSize: 5, taps: 4 },
+      { gridSize: 5, taps: 5 },
+      { gridSize: 6, taps: 5 },
+    ];
+
+    const ACHIEVEMENTS = [
+      { id: 'first_clear', title: 'First Clear', desc: 'Complete your first level.', check: ctx => ctx.levelsCompleted >= 1 },
+      { id: 'five_clears', title: 'Five Clears', desc: 'Complete 5 levels.', check: ctx => ctx.levelsCompleted >= 5 },
+      { id: 'ten_clears', title: 'Ten Clears', desc: 'Complete 10 levels.', check: ctx => ctx.levelsCompleted >= 10 },
+      { id: 'twenty_clears', title: 'Twenty Clears', desc: 'Complete 20 levels.', check: ctx => ctx.levelsCompleted >= 20 },
+      { id: 'thirty_clears', title: 'Thirty Clears', desc: 'Complete 30 levels.', check: ctx => ctx.levelsCompleted >= 30 },
+      { id: 'fifty_clears', title: 'Fifty Clears', desc: 'Complete 50 levels.', check: ctx => ctx.levelsCompleted >= 50 },
+      { id: 'seventyfive_clears', title: 'Seventy-Five Clears', desc: 'Complete 75 levels.', check: ctx => ctx.levelsCompleted >= 75 },
+      { id: 'hundred_clears', title: 'Hundred Clears', desc: 'Complete 100 levels.', check: ctx => ctx.levelsCompleted >= 100 },
+      { id: 'onefifty_clears', title: 'One Fifty', desc: 'Complete 150 levels.', check: ctx => ctx.levelsCompleted >= 150 },
+      { id: 'twohundred_clears', title: 'Two Hundred', desc: 'Complete 200 levels.', check: ctx => ctx.levelsCompleted >= 200 },
+      { id: 'twofifty_clears', title: 'Two Fifty', desc: 'Complete 250 levels.', check: ctx => ctx.levelsCompleted >= 250 },
+      { id: 'threehundred_clears', title: 'Three Hundred', desc: 'Complete 300 levels.', check: ctx => ctx.levelsCompleted >= 300 },
+      { id: 'threefifty_clears', title: 'Three Fifty', desc: 'Complete 350 levels.', check: ctx => ctx.levelsCompleted >= 350 },
+
+      { id: 'pack_one', title: 'Pack One', desc: 'Finish any pack.', check: ctx => ctx.packsCompleted >= 1 },
+      { id: 'pack_two', title: 'Pack Two', desc: 'Finish 2 packs.', check: ctx => ctx.packsCompleted >= 2 },
+      { id: 'pack_three', title: 'Pack Three', desc: 'Finish 3 packs.', check: ctx => ctx.packsCompleted >= 3 },
+      { id: 'pack_four', title: 'Pack Four', desc: 'Finish all packs.', check: ctx => ctx.packsCompleted >= PACK_DEFS.length },
+
+      { id: 'classic_10', title: 'Core Ten', desc: 'Complete 10 Core levels.', check: ctx => ctx.levelsByMechanic.classic >= 10 },
+      { id: 'classic_25', title: 'Core Twenty-Five', desc: 'Complete 25 Core levels.', check: ctx => ctx.levelsByMechanic.classic >= 25 },
+      { id: 'classic_40', title: 'Core Forty', desc: 'Complete 40 Core levels.', check: ctx => ctx.levelsByMechanic.classic >= 40 },
+      { id: 'dots_10', title: 'Fire Ten', desc: 'Complete 10 Fire levels.', check: ctx => ctx.levelsByMechanic.dots >= 10 },
+      { id: 'dots_25', title: 'Fire Twenty-Five', desc: 'Complete 25 Fire levels.', check: ctx => ctx.levelsByMechanic.dots >= 25 },
+      { id: 'dots_40', title: 'Fire Forty', desc: 'Complete 40 Fire levels.', check: ctx => ctx.levelsByMechanic.dots >= 40 },
+      { id: 'blocks_10', title: 'Earth Ten', desc: 'Complete 10 Earth levels.', check: ctx => ctx.levelsByMechanic.blocks >= 10 },
+      { id: 'blocks_25', title: 'Earth Twenty-Five', desc: 'Complete 25 Earth levels.', check: ctx => ctx.levelsByMechanic.blocks >= 25 },
+      { id: 'blocks_40', title: 'Earth Forty', desc: 'Complete 40 Earth levels.', check: ctx => ctx.levelsByMechanic.blocks >= 40 },
+      { id: 'wind_10', title: 'Wind Ten', desc: 'Complete 10 Wind levels.', check: ctx => ctx.levelsByMechanic.wind >= 10 },
+      { id: 'wind_25', title: 'Wind Twenty-Five', desc: 'Complete 25 Wind levels.', check: ctx => ctx.levelsByMechanic.wind >= 25 },
+      { id: 'wind_40', title: 'Wind Forty', desc: 'Complete 40 Wind levels.', check: ctx => ctx.levelsByMechanic.wind >= 40 },
+
+      { id: 'dots_clear_10', title: 'Ember Duster', desc: 'Extinguish 10 embers.', check: ctx => ctx.dotsCleared >= 10 },
+      { id: 'dots_clear_50', title: 'Ember Sweeper', desc: 'Extinguish 50 embers.', check: ctx => ctx.dotsCleared >= 50 },
+      { id: 'dots_clear_100', title: 'Ember Keeper', desc: 'Extinguish 100 embers.', check: ctx => ctx.dotsCleared >= 100 },
+      { id: 'dots_clear_200', title: 'Ember Master', desc: 'Extinguish 200 embers.', check: ctx => ctx.dotsCleared >= 200 },
+
+
+      { id: 'taps_50', title: 'Tapper', desc: 'Make 50 taps.', check: ctx => ctx.totalTaps >= 50 },
+      { id: 'taps_200', title: 'Rhythm', desc: 'Make 200 taps.', check: ctx => ctx.totalTaps >= 200 },
+      { id: 'taps_500', title: 'Cadence', desc: 'Make 500 taps.', check: ctx => ctx.totalTaps >= 500 },
+      { id: 'taps_1000', title: 'Pulse', desc: 'Make 1,000 taps.', check: ctx => ctx.totalTaps >= 1000 },
+      { id: 'taps_1500', title: 'Tempo', desc: 'Make 1,500 taps.', check: ctx => ctx.totalTaps >= 1500 },
+
+      { id: 'undo_1', title: 'Take It Back', desc: 'Use Undo once.', check: ctx => ctx.totalUndos >= 1 },
+      { id: 'undo_10', title: 'Rewind', desc: 'Use Undo 10 times.', check: ctx => ctx.totalUndos >= 10 },
+      { id: 'undo_25', title: 'Timekeeper', desc: 'Use Undo 25 times.', check: ctx => ctx.totalUndos >= 25 },
+
+      { id: 'hint_1', title: 'A Small Nudge', desc: 'Use Hint once.', check: ctx => ctx.totalHints >= 1 },
+      { id: 'hint_10', title: 'Guided', desc: 'Use Hint 10 times.', check: ctx => ctx.totalHints >= 10 },
+      { id: 'hint_25', title: 'Navigator', desc: 'Use Hint 25 times.', check: ctx => ctx.totalHints >= 25 },
+
+      { id: 'reset_1', title: 'Fresh Start', desc: 'Reset a level.', check: ctx => ctx.totalResets >= 1 },
+      { id: 'reset_10', title: 'Restart Ritual', desc: 'Reset 10 times.', check: ctx => ctx.totalResets >= 10 },
+
+      { id: 'streak_2', title: 'Two-Day Streak', desc: 'Complete the daily mix 2 days in a row.', check: ctx => ctx.dailyStreak >= 2 },
+      { id: 'streak_3', title: 'Three-Day Streak', desc: 'Complete the daily mix 3 days in a row.', check: ctx => ctx.dailyStreak >= 3 },
+      { id: 'streak_7', title: 'One Week', desc: 'Complete the daily mix 7 days in a row.', check: ctx => ctx.dailyStreak >= 7 },
+      { id: 'streak_14', title: 'Two Weeks', desc: 'Complete the daily mix 14 days in a row.', check: ctx => ctx.dailyStreak >= 14 },
+      { id: 'streak_30', title: 'Thirty Days', desc: 'Complete the daily mix 30 days in a row.', check: ctx => ctx.dailyStreak >= 30 },
+
+      { id: 'daily_1', title: 'Daily Mix', desc: 'Complete the daily mix once.', check: ctx => ctx.dailyCompletions >= 1 },
+      { id: 'daily_5', title: 'Daily Five', desc: 'Complete the daily mix 5 times.', check: ctx => ctx.dailyCompletions >= 5 },
+      { id: 'daily_10', title: 'Daily Ten', desc: 'Complete the daily mix 10 times.', check: ctx => ctx.dailyCompletions >= 10 },
+    ];
 
     // Game State
     let state = {
+      currentPack: 0,
       currentLevel: 0,
       grid: [],
       tapsRemaining: 0,
       history: [],
+      tapSequence: [],
       completedLevels: [],
+      achievementsUnlocked: [],
+      stats: null,
+      daily: null,
+      showingPackSelect: false,
       showingLevelSelect: false,
+      showingDailySelect: false,
+      playingDaily: false,
+      showingAchievements: false,
       showingWin: false,
       winTime: 0,
       animating: false,
+      transitioning: false,
+      transition: null,
     };
 
     // Animation State
@@ -183,6 +1611,149 @@
     // Input tracking
     let pointerStart = null;
 
+    let dailyPackCache = null;
+
+    function hashSeed(str) {
+      let hash = 0;
+      for (let i = 0; i < str.length; i++) {
+        hash = (hash * 31 + str.charCodeAt(i)) | 0;
+      }
+      return Math.abs(hash);
+    }
+
+    function generateDailyPack(dateKey) {
+      const seed = hashSeed(dateKey) + 1337;
+      const random = createSeededRandom(seed);
+      const usedSignatures = new Set();
+      const levels = [];
+      const mechanics = getDailyMechanics();
+
+      for (let i = 0; i < mechanics.length; i++) {
+        const mechanic = mechanics[i];
+        const diff = DAILY_DIFFICULTIES[Math.floor(random() * DAILY_DIFFICULTIES.length)];
+        let puzzle = generatePuzzle(diff.gridSize, diff.taps, seed + i * 901, usedSignatures, mechanic);
+
+        if (!puzzle) {
+          for (let fallbackAttempt = 0; fallbackAttempt < 6; fallbackAttempt++) {
+            const fallbackSeed = seed + i * 1777 + fallbackAttempt * 911;
+            const fallbackRandom = createSeededRandom(fallbackSeed);
+            const solution = placementStrategies.random(fallbackRandom, diff.gridSize, diff.taps);
+            const blocks = mechanicHas(mechanic, 'blocks')
+              ? buildBlockMask(diff.gridSize, fallbackSeed + 2222, Math.max(1, Math.min(diff.gridSize + 1, Math.floor(diff.gridSize * 0.7))))
+              : null;
+            const winds = mechanicHas(mechanic, 'wind')
+              ? buildWindLayout(diff.gridSize, solution, fallbackSeed + 3333)
+              : null;
+            const grid = buildGridFromSolution(diff.gridSize, solution, { mechanic, blocks, windCells: winds });
+            const candidate = { grid, solution, tapsRequired: diff.taps, blocks: blocks || [], winds: winds || [], needsSignature: true };
+            if (mechanicHas(mechanic, 'dots')) {
+              applyDotsToGrid(candidate.grid, diff.gridSize, solution, fallbackSeed + 4444, mechanic, candidate.blocks, candidate.winds);
+              candidate.dotsApplied = true;
+            }
+            if (mechanicHas(mechanic, 'wind')) {
+              if (!candidate.winds || candidate.winds.length === 0) {
+                candidate.winds = buildWindLayout(diff.gridSize, solution, fallbackSeed + 3333 + 515);
+              }
+            }
+            if (verifyPuzzleSolution(candidate.grid, diff.gridSize, solution, mechanic, candidate.blocks, candidate.winds)) {
+              puzzle = candidate;
+              break;
+            }
+          }
+        }
+
+        let hasDots = mechanicHas(mechanic, 'dots');
+        if (hasDots && !puzzle.dotsApplied) {
+          applyDotsToGrid(puzzle.grid, diff.gridSize, puzzle.solution, seed + i * 4444, mechanic, puzzle.blocks || [], puzzle.winds || []);
+        }
+        if (mechanicHas(mechanic, 'wind')) {
+          if (!puzzle.winds || puzzle.winds.length === 0) {
+            puzzle.winds = buildWindLayout(diff.gridSize, puzzle.solution, seed + i * 3333 + 515);
+          }
+        }
+        if (!verifyPuzzleSolution(puzzle.grid, diff.gridSize, puzzle.solution, mechanic, puzzle.blocks || [], puzzle.winds || [])) {
+          puzzle = null;
+          i -= 1;
+          continue;
+        }
+        if (puzzle.needsSignature) {
+          const signature = canonicalPuzzleSignature(puzzle.grid);
+          if (!usedSignatures.has(signature)) {
+            usedSignatures.add(signature);
+          }
+          puzzle.needsSignature = false;
+        }
+
+        const packDef = PACK_DEFS.find(p => p.mechanic === mechanic) || PACK_DEFS[0];
+        levels.push({
+          id: i + 1,
+          gridSize: diff.gridSize,
+          palette: (packDef.palette + i) % PALETTES.length,
+          initial: puzzle.grid,
+          solution: puzzle.solution,
+          tapsRequired: puzzle.tapsRequired,
+          hasDots,
+          mechanic,
+          blocks: puzzle.blocks || [],
+          winds: puzzle.winds || [],
+        });
+      }
+
+      return {
+        id: 'daily',
+        title: 'Daily Mix',
+        subtitle: 'One per mechanic',
+        palette: 0,
+        levels,
+        dateKey,
+      };
+    }
+
+    function getDailyPack() {
+      ensureDailyState();
+      if (!dailyPackCache || dailyPackCache.dateKey !== state.daily.dateKey) {
+        dailyPackCache = generateDailyPack(state.daily.dateKey);
+      }
+      return dailyPackCache;
+    }
+
+    function getCurrentPack() {
+      if (state.playingDaily) {
+        return getDailyPack();
+      }
+      return PACKS[state.currentPack];
+    }
+
+    function getCurrentLevel() {
+      const pack = getCurrentPack();
+      return pack.levels[state.currentLevel];
+    }
+
+    function levelKey(packIndex, levelIndex) {
+      return `${packIndex}:${levelIndex}`;
+    }
+
+    function isLevelCompleted(packIndex, levelIndex) {
+      return state.completedLevels.includes(levelKey(packIndex, levelIndex));
+    }
+
+    function isPackCompleted(packIndex) {
+      const pack = PACKS[packIndex];
+      return pack.levels.every((_, idx) => isLevelCompleted(packIndex, idx));
+    }
+
+    function indexToKey(globalIndex) {
+      let remaining = globalIndex;
+      for (let p = 0; p < PACKS.length; p++) {
+        const count = PACKS[p].levels.length;
+        if (remaining < count) {
+          return levelKey(p, remaining);
+        }
+        remaining -= count;
+      }
+      return null;
+    }
+
     // ============================================
     // UTILITY FUNCTIONS
     // ============================================
@@ -191,11 +1762,259 @@
       return JSON.parse(JSON.stringify(obj));
     }
 
+    function createDefaultStats() {
+      return {
+        levelsCompleted: 0,
+        totalTaps: 0,
+        totalUndos: 0,
+        totalHints: 0,
+        totalResets: 0,
+        dotsCleared: 0,
+        echoTriggers: 0,
+        blockedTaps: 0,
+        dailyCompletions: 0,
+        streakBest: 0,
+        levelsByMechanic: {
+          classic: 0,
+          dots: 0,
+          echo: 0,
+          blocks: 0,
+          wind: 0,
+        },
+      };
+    }
+
+    function normalizeStats(stats) {
+      const defaults = createDefaultStats();
+      if (!stats) return defaults;
+      return {
+        ...defaults,
+        ...stats,
+        levelsByMechanic: {
+          ...defaults.levelsByMechanic,
+          ...(stats.levelsByMechanic || {}),
+        },
+      };
+    }
+
+    function createDefaultDaily() {
+      return {
+        dateKey: '',
+        mechanics: {},
+        streak: 0,
+        lastCompletedKey: '',
+        completedToday: false,
+      };
+    }
+
+    function normalizeDaily(daily) {
+      const defaults = createDefaultDaily();
+      if (!daily) return defaults;
+      return {
+        ...defaults,
+        ...daily,
+        mechanics: daily.mechanics || {},
+      };
+    }
+
+    function formatDateKey(date) {
+      const y = date.getFullYear();
+      const m = String(date.getMonth() + 1).padStart(2, '0');
+      const d = String(date.getDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    }
+
+    function getTodayKey() {
+      return formatDateKey(new Date());
+    }
+
+    function getYesterdayKey() {
+      const d = new Date();
+      d.setDate(d.getDate() - 1);
+      return formatDateKey(d);
+    }
+
+    function ensureDailyState() {
+      if (!state.daily) {
+        state.daily = createDefaultDaily();
+      }
+      const today = getTodayKey();
+      if (state.daily.dateKey !== today) {
+        state.daily.dateKey = today;
+        state.daily.mechanics = {};
+        state.daily.completedToday = false;
+        dailyPackCache = null;
+      }
+    }
+
+    function getDailyMechanics() {
+      return DAILY_MECHANICS;
+    }
+
+    function getDailyProgress() {
+      ensureDailyState();
+      const mechanics = getDailyMechanics();
+      const doneCount = mechanics.filter(mech => state.daily.mechanics[mech]).length;
+      return { doneCount, total: mechanics.length, mechanics };
+    }
+
+    function recordDailyMechanic(mechanic, countCompletion = false) {
+      ensureDailyState();
+      const wasDone = !!state.daily.mechanics[mechanic];
+      state.daily.mechanics[mechanic] = true;
+      if (countCompletion && !wasDone) {
+        state.stats.levelsCompleted += 1;
+        if (state.stats.levelsByMechanic[mechanic] !== undefined) {
+          state.stats.levelsByMechanic[mechanic] += 1;
+        }
+      }
+      const progress = getDailyProgress();
+      if (!state.daily.completedToday && progress.doneCount === progress.total) {
+        state.daily.completedToday = true;
+        const yesterday = getYesterdayKey();
+        if (state.daily.lastCompletedKey === yesterday) {
+          state.daily.streak += 1;
+        } else {
+          state.daily.streak = 1;
+        }
+        state.daily.lastCompletedKey = state.daily.dateKey;
+        state.stats.dailyCompletions += 1;
+        state.stats.streakBest = Math.max(state.stats.streakBest, state.daily.streak);
+      }
+    }
+
+    function getCompletedPackCount() {
+      let count = 0;
+      for (let i = 0; i < PACKS.length; i++) {
+        if (isPackCompleted(i)) count++;
+      }
+      return count;
+    }
+
+    function getAchievementContext() {
+      return {
+        levelsCompleted: state.stats.levelsCompleted,
+        packsCompleted: getCompletedPackCount(),
+        totalTaps: state.stats.totalTaps,
+        totalUndos: state.stats.totalUndos,
+        totalHints: state.stats.totalHints,
+        totalResets: state.stats.totalResets,
+        dotsCleared: state.stats.dotsCleared,
+        echoTriggers: state.stats.echoTriggers,
+        blockedTaps: state.stats.blockedTaps,
+        dailyCompletions: state.stats.dailyCompletions,
+        dailyStreak: state.daily.streak,
+        streakBest: state.stats.streakBest,
+        levelsByMechanic: state.stats.levelsByMechanic,
+      };
+    }
+
+    function rebuildStatsFromProgress() {
+      const stats = createDefaultStats();
+      for (const key of state.completedLevels) {
+        const parts = key.split(':');
+        if (parts.length !== 2) continue;
+        const packIndex = parseInt(parts[0], 10);
+        const levelIndex = parseInt(parts[1], 10);
+        if (Number.isNaN(packIndex) || Number.isNaN(levelIndex)) continue;
+        const pack = PACKS[packIndex];
+        if (!pack) continue;
+        stats.levelsCompleted += 1;
+        const mech = pack.mechanic;
+        if (stats.levelsByMechanic[mech] !== undefined) {
+          stats.levelsByMechanic[mech] += 1;
+        }
+      }
+      return stats;
+    }
+
+    function remapCompletedLevels(keys, hasLegacyEcho = false) {
+      const remapped = [];
+      for (const key of keys) {
+        const parts = key.split(':');
+        if (parts.length !== 2) continue;
+        const packIndex = parseInt(parts[0], 10);
+        const levelIndex = parseInt(parts[1], 10);
+        if (Number.isNaN(packIndex) || Number.isNaN(levelIndex)) continue;
+        let newPackIndex = packIndex;
+        if (hasLegacyEcho) {
+          if (packIndex === 3) newPackIndex = 2; // old blocks -> new earth
+          if (packIndex === 2) continue; // old echo dropped
+        }
+        if (newPackIndex < 0 || newPackIndex >= PACKS.length) continue;
+        const pack = PACKS[newPackIndex];
+        if (!pack || levelIndex < 0 || levelIndex >= pack.levels.length) continue;
+        remapped.push(levelKey(newPackIndex, levelIndex));
+      }
+      return remapped;
+    }
+
+    function updateAchievements() {
+      const unlocked = new Set(state.achievementsUnlocked || []);
+      const context = getAchievementContext();
+      let changed = false;
+      for (const ach of ACHIEVEMENTS) {
+        if (!unlocked.has(ach.id) && ach.check(context)) {
+          unlocked.add(ach.id);
+          changed = true;
+        }
+      }
+      if (changed) {
+        state.achievementsUnlocked = Array.from(unlocked);
+      }
+    }
+
+    function isAchievementUnlocked(id) {
+      return state.achievementsUnlocked.includes(id);
+    }
+
     function hexToRgba(hex, alpha) {
       const r = parseInt(hex.slice(1, 3), 16);
       const g = parseInt(hex.slice(3, 5), 16);
       const b = parseInt(hex.slice(5, 7), 16);
       return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    }
+
+    function getLuminance(hex) {
+      const r = parseInt(hex.slice(1, 3), 16) / 255;
+      const g = parseInt(hex.slice(3, 5), 16) / 255;
+      const b = parseInt(hex.slice(5, 7), 16) / 255;
+      const lin = v => (v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4));
+      return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+    }
+
+    function getReadableTextColor(hex) {
+      return getLuminance(hex) > 0.55 ? '#1f1f1f' : '#ffffff';
+    }
+
+    function buildRoundedRectPath(rx, ry, rw, rh, radius) {
+      const r = Math.max(0, Math.min(radius, rw / 2, rh / 2));
+      ctx.beginPath();
+      ctx.moveTo(rx + r, ry);
+      ctx.lineTo(rx + rw - r, ry);
+      ctx.arcTo(rx + rw, ry, rx + rw, ry + r, r);
+      ctx.lineTo(rx + rw, ry + rh - r);
+      ctx.arcTo(rx + rw, ry + rh, rx + rw - r, ry + rh, r);
+      ctx.lineTo(rx + r, ry + rh);
+      ctx.arcTo(rx, ry + rh, rx, ry + rh - r, r);
+      ctx.lineTo(rx, ry + r);
+      ctx.arcTo(rx, ry, rx + r, ry, r);
+      ctx.closePath();
+    }
+
+    function fillRoundedRect(rx, ry, rw, rh, radius) {
+      buildRoundedRectPath(rx, ry, rw, rh, radius);
+      ctx.fill();
+    }
+
+    function strokeRoundedRect(rx, ry, rw, rh, radius) {
+      buildRoundedRectPath(rx, ry, rw, rh, radius);
+      ctx.stroke();
+    }
+
+    function easeInOut(t) {
+      const clamped = Math.max(0, Math.min(1, t));
+      return clamped * clamped * (3 - 2 * clamped);
     }
 
     // ============================================
@@ -208,6 +2027,7 @@
       canvas.height = window.innerHeight * dpr;
       canvas.style.width = window.innerWidth + 'px';
       canvas.style.height = window.innerHeight + 'px';
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.scale(dpr, dpr);
       calculateLayout();
     }
@@ -215,7 +2035,7 @@
     function calculateLayout() {
       const w = window.innerWidth;
       const h = window.innerHeight;
-      const level = LEVELS[state.currentLevel];
+      const level = getCurrentLevel();
       const gridCount = level ? level.gridSize : 3;
 
       // Grid takes 85% of the smaller dimension
@@ -230,42 +2050,80 @@
     // LEVEL MANAGEMENT
     // ============================================
 
-    function loadLevel(levelIndex) {
-      const level = LEVELS[levelIndex];
+    function loadLevel(levelIndex, packIndex = state.currentPack) {
+      const pack = PACKS[packIndex];
+      const level = pack.levels[levelIndex];
+      state.currentPack = packIndex;
       state.currentLevel = levelIndex;
+      state.playingDaily = false;
       state.grid = deepCopy(level.initial);
       state.tapsRemaining = level.tapsRequired;
       state.history = [];
+      state.tapSequence = [];
       state.showingWin = false;
       state.showingLevelSelect = false;
+      state.showingDailySelect = false;
+      state.showingAchievements = false;
       state.animating = false;
       animations = [];
       calculateLayout();
+      updateAchievements();
       saveProgress();
     }
 
-    function checkWin() {
-      const level = LEVELS[state.currentLevel];
+    function loadDailyLevel(levelIndex) {
+      const pack = getDailyPack();
+      const level = pack.levels[levelIndex];
+      state.currentLevel = levelIndex;
+      state.playingDaily = true;
+      state.grid = deepCopy(level.initial);
+      state.tapsRemaining = level.tapsRequired;
+      state.history = [];
+      state.tapSequence = [];
+      state.showingWin = false;
+      state.showingLevelSelect = false;
+      state.showingDailySelect = false;
+      state.showingAchievements = false;
+      state.animating = false;
+      animations = [];
+      calculateLayout();
+      updateAchievements();
+      saveProgress();
+    }
+
+    function isSolved() {
+      const level = getCurrentLevel();
       const grid = state.grid;
-
-      // Must use exactly the right number of taps
-      if (state.tapsRemaining !== 0) return false;
-
-      // All cells must be parity 0 (matching background)
       for (let r = 0; r < level.gridSize; r++) {
         for (let c = 0; c < level.gridSize; c++) {
           if (grid[r][c].parity !== 0) return false;
+          if (grid[r][c].dot === 1) return false;
         }
       }
       return true;
     }
 
+    function checkWin() {
+      if (state.tapsRemaining !== 0) return false;
+      return isSolved();
+    }
+
     function handleWin() {
       state.showingWin = true;
       state.winTime = performance.now();
-      if (!state.completedLevels.includes(state.currentLevel)) {
-        state.completedLevels.push(state.currentLevel);
+      const key = levelKey(state.currentPack, state.currentLevel);
+      const level = getCurrentLevel();
+      recordDailyMechanic(level.mechanic, state.playingDaily);
+      if (!state.playingDaily) {
+        if (!state.completedLevels.includes(key)) {
+          state.completedLevels.push(key);
+          state.stats.levelsCompleted += 1;
+          if (state.stats.levelsByMechanic[level.mechanic] !== undefined) {
+            state.stats.levelsByMechanic[level.mechanic] += 1;
+          }
+        }
       }
+      updateAchievements();
       saveProgress();
     }
 
@@ -274,17 +2132,42 @@
     // ============================================
 
     function handleTap(row, col, tapX = 0.5, tapY = 0.5) {
-      if (state.showingWin || state.showingLevelSelect || state.animating) return;
+      if (state.showingWin || state.showingLevelSelect || state.showingPackSelect || state.animating || state.transitioning) return;
       if (state.tapsRemaining <= 0) return;
 
-      const level = LEVELS[state.currentLevel];
+      const level = getCurrentLevel();
       const gridSize = level.gridSize;
+      const mechanic = level.mechanic;
+      const hasBlocks = mechanicHas(mechanic, 'blocks');
+      const hasEcho = mechanicHas(mechanic, 'echo');
+      const hasWind = mechanicHas(mechanic, 'wind');
+      const hasDots = mechanicHas(mechanic, 'dots');
+      const isBlocked = (r, c) => hasBlocks && state.grid[r][c].block === 1;
+      const pendingEcho = new Set();
+      const isEcho = (r, c) => hasEcho && state.grid[r][c].echo === 1 && !pendingEcho.has(`${r},${c}`);
+      const isWind = (r, c) => hasWind && state.grid[r][c].wind === 1;
+
+      if (hasBlocks && isBlocked(row, col)) {
+        state.stats.blockedTaps += 1;
+        return;
+      }
+      if (hasEcho && isEcho(row, col)) {
+        return;
+      }
 
       // Block further taps during animation
       state.animating = true;
+      state.stats.totalTaps += 1;
+
+      // Calculate max distance for wave timing
+      let maxDist = 0;
+      const pulseDuration = 300;
+      const waveDelay = 80;
+      const echoDelay = 160;
 
       // Save state for undo (including tapsRemaining)
       state.history.push({ grid: deepCopy(state.grid), tapsRemaining: state.tapsRemaining });
+      state.tapSequence.push({ row, col });
 
       // Decrement taps remaining
       state.tapsRemaining--;
@@ -294,50 +2177,187 @@
         state.history.shift();
       }
 
-      // Calculate max distance for wave timing
-      let maxDist = 0;
-      const pulseDuration = 300;
-      const waveDelay = 80;
+      const usedMoveIndex = state.tapsRemaining;
+      animations.push({
+        type: 'move',
+        index: usedMoveIndex,
+        startTime: performance.now(),
+        duration: pulseDuration,
+      });
 
-      // Tapped cell pulses first
-      toggleCell(row, col, 0, 'pulse', pulseDuration);
+      const triggeredEcho = new Set();
+      const tapQueue = [{ row, col, startDelay: 0 }];
+      let totalDuration = 0;
 
-      // Toggle rest of row with wave delay from tap point
-      for (let c = 0; c < gridSize; c++) {
-        if (c !== col) {
-          const dist = Math.abs(c - col);
+      function scheduleTapWave(tapRow, tapCol, baseDelay) {
+        if (hasBlocks && isBlocked(tapRow, tapCol)) {
+          return;
+        }
+
+        const triggeredThisTap = [];
+        let waveMaxDist = 0;
+
+        const maybeCollectEcho = (r, c, delay) => {
+          if (!hasEcho || !isEcho(r, c)) return;
+          const key = `${r},${c}`;
+          if (triggeredEcho.has(key)) return;
+          triggeredEcho.add(key);
+          pendingEcho.add(key);
+          state.stats.echoTriggers += 1;
+          animations.push({
+            type: 'echo-hit',
+            row: r,
+            col: c,
+            startTime: performance.now() + delay,
+            duration: pulseDuration * 0.9,
+          });
+          triggeredThisTap.push({ row: r, col: c, key });
+        };
+
+        const removeDots = hasDots;
+
+        const scheduleToggle = (r, c, dist, removeDot, suppressWindFlow = false, extraDelay = 0) => {
+          const delay = baseDelay + extraDelay + dist * waveDelay;
           maxDist = Math.max(maxDist, dist);
-          toggleCell(row, c, dist * waveDelay, 'pulse', pulseDuration);
+          waveMaxDist = Math.max(waveMaxDist, dist);
+          const hadWind = hasWind && state.grid[r][c].wind === 1;
+          const windDir = hadWind ? state.grid[r][c].windDir : 0;
+          toggleCell(r, c, delay, 'pulse', pulseDuration, removeDot);
+          totalDuration = Math.max(totalDuration, delay + pulseDuration);
+          maybeCollectEcho(r, c, delay);
+          if (hadWind && !suppressWindFlow) {
+            scheduleWindFlow(r, c, windDir, delay);
+          }
+        };
+
+        const scheduleWindFlow = (originRow, originCol, dir, startDelay) => {
+          const extraDelay = Math.max(0, startDelay - baseDelay);
+          const deltas = [
+            { dr: -1, dc: 0 },
+            { dr: 0, dc: 1 },
+            { dr: 1, dc: 0 },
+            { dr: 0, dc: -1 },
+          ];
+          const delta = deltas[dir] || deltas[0];
+          let step = 1;
+          let r = originRow + delta.dr;
+          let c = originCol + delta.dc;
+          while (r >= 0 && r < gridSize && c >= 0 && c < gridSize) {
+            if (hasBlocks && isBlocked(r, c)) {
+              break;
+            }
+            scheduleToggle(r, c, Math.max(step, 1), removeDots, false, extraDelay);
+            r += delta.dr;
+            c += delta.dc;
+            step += 1;
+          }
+        };
+
+        if (hasWind && isWind(tapRow, tapCol)) {
+          const dir = state.grid[tapRow][tapCol].windDir;
+          scheduleToggle(tapRow, tapCol, 0, removeDots, true);
+          scheduleWindFlow(tapRow, tapCol, dir, baseDelay);
+
+          return;
+        }
+
+        scheduleToggle(tapRow, tapCol, 0, removeDots);
+
+        for (let c = tapCol - 1; c >= 0; c--) {
+          if (hasBlocks && isBlocked(tapRow, c)) {
+            break;
+          }
+          scheduleToggle(tapRow, c, Math.abs(c - tapCol), removeDots);
+        }
+        for (let c = tapCol + 1; c < gridSize; c++) {
+          if (hasBlocks && isBlocked(tapRow, c)) {
+            break;
+          }
+          scheduleToggle(tapRow, c, Math.abs(c - tapCol), removeDots);
+        }
+
+        for (let r = tapRow - 1; r >= 0; r--) {
+          if (hasBlocks && isBlocked(r, tapCol)) {
+            break;
+          }
+          scheduleToggle(r, tapCol, Math.abs(r - tapRow), removeDots);
+        }
+        for (let r = tapRow + 1; r < gridSize; r++) {
+          if (hasBlocks && isBlocked(r, tapCol)) {
+            break;
+          }
+          scheduleToggle(r, tapCol, Math.abs(r - tapRow), removeDots);
+        }
+
+        if (triggeredThisTap.length > 0) {
+          const echoStart = baseDelay + waveMaxDist * waveDelay + pulseDuration + echoDelay;
+          totalDuration = Math.max(totalDuration, echoStart + pulseDuration);
+          for (const cell of triggeredThisTap) {
+            tapQueue.push({ row: cell.row, col: cell.col, startDelay: echoStart });
+            setTimeout(() => {
+              state.grid[cell.row][cell.col].echo = 0;
+              pendingEcho.delete(cell.key);
+            }, echoStart);
+            animations.push({
+              type: 'echo-fire',
+              row: cell.row,
+              col: cell.col,
+              startTime: performance.now() + echoStart,
+              duration: pulseDuration,
+            });
+          }
         }
       }
 
-      // Toggle rest of column with wave delay from tap point
-      for (let r = 0; r < gridSize; r++) {
-        if (r !== row) {
-          const dist = Math.abs(r - row);
-          maxDist = Math.max(maxDist, dist);
-          toggleCell(r, col, dist * waveDelay, 'pulse', pulseDuration);
-        }
+      while (tapQueue.length) {
+        const tap = tapQueue.shift();
+        scheduleTapWave(tap.row, tap.col, tap.startDelay);
       }
 
       // Check win and re-enable tapping after animations complete
-      const animDuration = maxDist * waveDelay + pulseDuration;
       setTimeout(() => {
         state.animating = false;
         if (checkWin()) {
           handleWin();
         }
-      }, animDuration + 50);
+      }, totalDuration + 50);
 
       saveProgress();
     }
 
-    function toggleCell(row, col, delay = 0, direction = 'horizontal', duration = 300) {
+    function toggleCell(row, col, delay = 0, direction = 'horizontal', duration = 300, removeDot = false) {
       const cell = state.grid[row][col];
       const previousParity = cell.parity;
 
+      if (removeDot && cell.dot === 1) {
+        const startTime = performance.now() + delay;
+        const hasActiveDot = animations.some(anim =>
+          anim.type === 'dot' && anim.row === row && anim.col === col && startTime < anim.startTime + anim.duration
+        );
+        if (!hasActiveDot) {
+          animations.push({
+            type: 'dot',
+            row,
+            col,
+            startTime,
+            duration,
+          });
+        }
+      }
+
       // Toggle parity
       cell.parity = (cell.parity + 1) % 2;
+      if (cell.wind === 1) {
+        const removeDelay = Math.max(0, delay);
+        setTimeout(() => {
+          const current = state.grid?.[row]?.[col];
+          if (!current || current !== cell) return;
+          if (current.wind === 1) {
+            current.wind = 0;
+            current.windDir = 0;
+          }
+        }, removeDelay);
+      }
 
       // Add wave flip animation - stores previous state for smooth transition
       animations.push({
@@ -356,16 +2376,72 @@
         const prevState = state.history.pop();
         state.grid = prevState.grid;
         state.tapsRemaining = prevState.tapsRemaining;
+        if (state.tapSequence.length > 0) {
+          state.tapSequence.pop();
+        }
         state.animating = false;
         animations = [];
+        state.stats.totalUndos += 1;
+        updateAchievements();
         saveProgress();
       }
     }
 
     function resetLevel() {
       if (!state.showingLevelSelect) {
+        state.stats.totalResets += 1;
+        updateAchievements();
         loadLevel(state.currentLevel);
       }
+    }
+
+    function getHintCell() {
+      const level = getCurrentLevel();
+      if (!level || !level.solution || level.solution.length === 0) return null;
+      const used = new Set(state.tapSequence.map(tap => `${tap.row},${tap.col}`));
+      for (const tap of level.solution) {
+        const key = `${tap.row},${tap.col}`;
+        if (!used.has(key)) {
+          return tap;
+        }
+      }
+      return null;
+    }
+
+    function showHint() {
+      if (state.showingWin || state.showingLevelSelect || state.animating) return;
+      if (state.tapsRemaining <= 0) return;
+      const hint = getHintCell();
+      if (!hint) return;
+      state.stats.totalHints += 1;
+      updateAchievements();
+      animations = animations.filter(anim => anim.type !== 'hint');
+      animations.push({
+        type: 'hint',
+        row: hint.row,
+        col: hint.col,
+        startTime: performance.now(),
+        duration: 1200,
+        pulses: 2,
+      });
+      saveProgress();
+    }
+
+    function isInvalidState() {
+      return state.tapsRemaining === 0 && !state.animating && !state.showingWin && !isSolved();
+    }
+
+    function getMoveBarLayout() {
+      const level = getCurrentLevel();
+      if (!level) return null;
+      const totalMoves = level.tapsRequired;
+      if (totalMoves <= 0) return null;
+
+      const barHeight = Math.max(3, layout.cellSize * 0.06);
+      const barY = layout.gridY + layout.gridSize + 14;
+      const barX = layout.gridX;
+      const barWidth = layout.gridSize;
+      return { x: barX, y: barY, w: barWidth, h: barHeight };
     }
 
     // ============================================
@@ -374,14 +2450,14 @@
 
     function saveProgress() {
       const saveData = {
-        currentLevel: state.currentLevel,
-        grid: state.grid,
-        tapsRemaining: state.tapsRemaining,
-        history: state.history,
         completedLevels: state.completedLevels,
+        achievementsUnlocked: state.achievementsUnlocked,
+        stats: state.stats,
+        daily: state.daily,
+        saveVersion: 4,
       };
       try {
-        localStorage.setItem('parity_save_v2', JSON.stringify(saveData));
+        localStorage.setItem('parity_save_v3', JSON.stringify(saveData));
       } catch (e) {
         // Storage might be full or unavailable
       }
@@ -389,22 +2465,43 @@
 
     function loadProgress() {
       try {
-        const saved = localStorage.getItem('parity_save_v2');
+        const saved = localStorage.getItem('parity_save_v3') || localStorage.getItem('parity_save_v2');
         if (saved) {
           const data = JSON.parse(saved);
-          state.completedLevels = data.completedLevels || [];
-          if (data.currentLevel !== undefined && data.grid) {
-            state.currentLevel = data.currentLevel;
-            state.grid = data.grid;
-            state.tapsRemaining = data.tapsRemaining;
-            state.history = data.history || [];
-            calculateLayout();
-            return true;
+          const completed = data.completedLevels || [];
+          const saveVersion = data.saveVersion || 0;
+          if (completed.length > 0 && typeof completed[0] === 'number') {
+            const mapped = [];
+            for (const idx of completed) {
+              const key = indexToKey(idx);
+              if (key) mapped.push(key);
+            }
+            const hasLegacyEcho = saveVersion < 4 && mapped.some(key => parseInt(key.split(':')[0], 10) === 3);
+            state.completedLevels = remapCompletedLevels(mapped, hasLegacyEcho);
+          } else {
+            const filtered = completed.filter(key => typeof key === 'string');
+            const hasLegacyEcho = saveVersion < 4 && filtered.some(key => parseInt(key.split(':')[0], 10) === 3);
+            state.completedLevels = remapCompletedLevels(filtered, hasLegacyEcho);
           }
+          state.achievementsUnlocked = data.achievementsUnlocked || [];
+          state.stats = normalizeStats(data.stats);
+          state.daily = normalizeDaily(data.daily);
+          if (!data.stats && state.completedLevels.length > 0) {
+            state.stats = rebuildStatsFromProgress();
+          }
+          ensureDailyState();
+          updateAchievements();
+          return true;
         }
       } catch (e) {
         // Corrupted save, start fresh
       }
+      state.completedLevels = [];
+      state.achievementsUnlocked = [];
+      state.stats = createDefaultStats();
+      state.daily = createDefaultDaily();
+      ensureDailyState();
+      updateAchievements();
       return false;
     }
 
@@ -420,7 +2517,7 @@
     }
 
     function screenToGrid(x, y) {
-      const level = LEVELS[state.currentLevel];
+      const level = getCurrentLevel();
       const gridSize = level.gridSize;
 
       const relX = x - layout.gridX;
@@ -440,25 +2537,79 @@
       return { row, col };
     }
 
-    function checkCornerIcon(x, y) {
-      const iconSize = 40;
-      const margin = 20;
-      const w = window.innerWidth;
-      const h = window.innerHeight;
+    const CONTROL_LABELS = [
+      { id: 'levelSelect', label: 'Menu' },
+      { id: 'reset', label: 'Reset' },
+      { id: 'undo', label: 'Undo' },
+      { id: 'hint', label: 'Hint' },
+    ];
 
-      // Top-left: Level select
-      if (x < margin + iconSize && y < margin + iconSize) {
-        return 'levelSelect';
+    function getControlButtons() {
+      const w = window.innerWidth;
+      const paddingX = 14;
+      const paddingY = 7;
+      const gap = 8;
+      const font = '14px -apple-system, BlinkMacSystemFont, sans-serif';
+      ctx.font = font;
+
+      const height = 28 + paddingY;
+      const y = 52;
+
+      const menuWidth = ctx.measureText(CONTROL_LABELS[0].label).width + paddingX * 2;
+      const rightLabels = CONTROL_LABELS.slice(1);
+      const rightWidths = rightLabels.map(btn => ctx.measureText(btn.label).width + paddingX * 2);
+      const rightTotal = rightWidths.reduce((sum, v) => sum + v, 0) + gap * (rightWidths.length - 1);
+
+      const buttons = [];
+      // Menu top-left
+      buttons.push({
+        id: CONTROL_LABELS[0].id,
+        label: CONTROL_LABELS[0].label,
+        x: 20,
+        y,
+        w: menuWidth,
+        h: height,
+      });
+
+      // Other controls grouped top-right
+      let cursor = w - 20 - rightTotal;
+      for (let i = 0; i < rightLabels.length; i++) {
+        const width = rightWidths[i];
+        buttons.push({
+          id: rightLabels[i].id,
+          label: rightLabels[i].label,
+          x: cursor,
+          y,
+          w: width,
+          h: height,
+        });
+        cursor += width + gap;
       }
-      // Top-right: Reset
-      if (x > w - margin - iconSize && y < margin + iconSize) {
-        return 'reset';
-      }
-      // Bottom-left: Undo
-      if (x < margin + iconSize && y > h - margin - iconSize) {
-        return 'undo';
+
+      return buttons;
+    }
+
+    function getControlHit(x, y) {
+      const buttons = getControlButtons();
+      for (const btn of buttons) {
+        if (x >= btn.x && x <= btn.x + btn.w && y >= btn.y && y <= btn.y + btn.h) {
+          return btn.id;
+        }
       }
       return null;
+    }
+
+    function getPackButtonRect() {
+      return { x: 20, y: 20, w: 68, h: 24 };
+    }
+
+    function getAchievementsButtonRect() {
+      const w = window.innerWidth;
+      return { x: w - 132, y: 20, w: 112, h: 24 };
+    }
+
+    function getAchievementsBackRect() {
+      return { x: 20, y: 20, w: 68, h: 24 };
     }
 
     function handlePointerDown(e) {
@@ -479,6 +2630,36 @@
       const dy = pos.y - pointerStart.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
 
+      // Swipe for level select paging
+      if (state.showingLevelSelect && !state.transitioning && dist >= 10) {
+        const swipeThreshold = 40;
+        if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > swipeThreshold) {
+          const totalPages = Math.ceil(getCurrentPack().levels.length / levelsPerPage);
+          if (dx < 0 && levelSelectPage < totalPages - 1) {
+            levelSelectPage++;
+          } else if (dx > 0 && levelSelectPage > 0) {
+            levelSelectPage--;
+          }
+          pointerStart = null;
+          return;
+        }
+      }
+
+      // Swipe for achievements paging
+      if (state.showingAchievements && !state.transitioning && dist >= 10) {
+        const swipeThreshold = 40;
+        if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > swipeThreshold) {
+          const totalPages = Math.ceil(ACHIEVEMENTS.length / achievementsPerPage);
+          if (dx < 0 && achievementsPage < totalPages - 1) {
+            achievementsPage++;
+          } else if (dx > 0 && achievementsPage > 0) {
+            achievementsPage--;
+          }
+          pointerStart = null;
+          return;
+        }
+      }
+
       // Only register as tap if movement < 10px
       if (dist < 10) {
         handleClick(pos.x, pos.y);
@@ -488,15 +2669,106 @@
     }
 
     function handleClick(x, y) {
+      if (state.transitioning) return;
+      if (state.showingPackSelect) {
+        const dailyRect = getDailyCardRect();
+        if (x >= dailyRect.x && x <= dailyRect.x + dailyRect.w && y >= dailyRect.y && y <= dailyRect.y + dailyRect.h) {
+          achievementsPage = 0;
+          state.transitioning = true;
+          state.transition = {
+            kind: 'toDailySelect',
+            startTime: performance.now(),
+          };
+          return;
+        }
+        const achBtn = getAchievementsButtonRect();
+        if (x >= achBtn.x && x <= achBtn.x + achBtn.w && y >= achBtn.y && y <= achBtn.y + achBtn.h) {
+          achievementsPage = 0;
+          state.transitioning = true;
+          state.transition = {
+            kind: 'toAchievements',
+            startTime: performance.now(),
+          };
+          return;
+        }
+        const selectedPack = getPackSelectHit(x, y);
+        if (selectedPack !== null) {
+          state.currentPack = selectedPack;
+          state.currentLevel = 0;
+          levelSelectPage = 0;
+          state.transitioning = true;
+          state.transition = {
+            kind: 'toPackLevels',
+            startTime: performance.now(),
+            packIndex: selectedPack,
+          };
+        }
+        return;
+      }
+      if (state.showingAchievements) {
+        const backBtn = getAchievementsBackRect();
+        if (x >= backBtn.x && x <= backBtn.x + backBtn.w && y >= backBtn.y && y <= backBtn.y + backBtn.h) {
+          state.transitioning = true;
+          state.transition = {
+            kind: 'toPackSelectFromAchievements',
+            startTime: performance.now(),
+          };
+          return;
+        }
+
+        const w = window.innerWidth;
+        const h = window.innerHeight;
+        const totalPages = Math.ceil(ACHIEVEMENTS.length / achievementsPerPage);
+        if (x < 50 && y > h / 2 - 30 && y < h / 2 + 30 && achievementsPage > 0) {
+          achievementsPage--;
+          return;
+        }
+        if (x > w - 50 && y > h / 2 - 30 && y < h / 2 + 30 && achievementsPage < totalPages - 1) {
+          achievementsPage++;
+          return;
+        }
+        return;
+      }
+      if (state.showingDailySelect) {
+        const backBtn = getPackButtonRect();
+        if (x >= backBtn.x && x <= backBtn.x + backBtn.w && y >= backBtn.y && y <= backBtn.y + backBtn.h) {
+          state.transitioning = true;
+          state.transition = {
+            kind: 'toPackSelectFromDaily',
+            startTime: performance.now(),
+          };
+          return;
+        }
+        const selected = getDailySelectHit(x, y);
+        if (selected !== null && !state.transitioning) {
+          state.transitioning = true;
+          state.transition = {
+            kind: 'toDailyLevel',
+            phase: 'out',
+            startTime: performance.now(),
+            toLevel: selected,
+          };
+        }
+        return;
+      }
       // Check for win screen tap
       if (state.showingWin) {
         const elapsed = performance.now() - state.winTime;
         if (elapsed > 500) {
           // Auto-advance to next level or back to level select
-          if (state.currentLevel < LEVELS.length - 1) {
-            loadLevel(state.currentLevel + 1);
+          const pack = getCurrentPack();
+          if (state.currentLevel < pack.levels.length - 1) {
+            if (state.playingDaily) {
+              loadDailyLevel(state.currentLevel + 1);
+            } else {
+              loadLevel(state.currentLevel + 1, state.currentPack);
+            }
           } else {
-            state.showingLevelSelect = true;
+            if (state.playingDaily) {
+              state.showingDailySelect = true;
+            } else {
+              state.showingLevelSelect = true;
+            }
             state.showingWin = false;
           }
         }
@@ -505,26 +2777,25 @@
 
       // Check for level select screen
       if (state.showingLevelSelect) {
-        const selected = getLevelSelectHit(x, y);
-        if (selected !== null) {
-          loadLevel(selected);
+        const packBtn = getPackButtonRect();
+        if (x >= packBtn.x && x <= packBtn.x + packBtn.w && y >= packBtn.y && y <= packBtn.y + packBtn.h) {
+          state.transitioning = true;
+          state.transition = {
+            kind: 'toPackSelect',
+            startTime: performance.now(),
+          };
+          return;
         }
-        return;
-      }
-
-      // Check corner icons
-      const icon = checkCornerIcon(x, y);
-      if (icon === 'levelSelect') {
-        state.showingLevelSelect = true;
-        levelSelectPage = Math.floor(state.currentLevel / levelsPerPage);
-        return;
-      }
-      if (icon === 'reset') {
-        resetLevel();
-        return;
-      }
-      if (icon === 'undo') {
-        undo();
+        const selected = getLevelSelectHit(x, y);
+        if (selected !== null && !state.transitioning) {
+          state.transitioning = true;
+          state.transition = {
+            kind: 'toLevel',
+            phase: 'out',
+            startTime: performance.now(),
+            toLevel: selected,
+          };
+        }
         return;
       }
 
@@ -537,6 +2808,49 @@
         const tapX = (x - cellX) / layout.cellSize;
         const tapY = (y - cellY) / layout.cellSize;
         handleTap(cell.row, cell.col, tapX, tapY);
+        return;
+      }
+
+      // Check control buttons
+      const control = getControlHit(x, y);
+      if (control === 'levelSelect') {
+        if (state.playingDaily) {
+          if (!state.transitioning) {
+            state.transitioning = true;
+            state.transition = {
+              kind: 'toDailySelectFromGame',
+              startTime: performance.now(),
+            };
+          }
+        } else {
+          levelSelectPage = Math.floor(state.currentLevel / levelsPerPage);
+          if (!state.transitioning) {
+            state.transitioning = true;
+            state.transition = {
+              kind: 'toMenu',
+              startTime: performance.now(),
+            };
+          }
+        }
+        return;
+      }
+      if (control === 'reset') {
+        resetLevel();
+        return;
+      }
+      if (control === 'undo') {
+        undo();
+        return;
+      }
+      if (control === 'hint') {
+        showHint();
+        return;
+      }
+
+      const moveBar = getMoveBarLayout();
+      if (moveBar && x >= moveBar.x && x <= moveBar.x + moveBar.w && y >= moveBar.y && y <= moveBar.y + moveBar.h) {
+        undo();
+        return;
       }
     }
 
@@ -544,14 +2858,14 @@
       const w = window.innerWidth;
       const h = window.innerHeight;
       const cols = 5;
-      const rows = 4;
-      const cellSize = Math.min(w * 0.9 / cols, h * 0.65 / rows);
+      const rows = 6;
+      const cellSize = Math.min(w * 0.9 / cols, h * 0.72 / rows);
       const gridW = cols * cellSize;
       const gridH = rows * cellSize;
       const startX = (w - gridW) / 2;
       const startY = (h - gridH) / 2 + 20;
 
-      const totalPages = Math.ceil(LEVELS.length / levelsPerPage);
+      const totalPages = Math.ceil(getCurrentPack().levels.length / levelsPerPage);
 
       // Check left arrow
       if (x < 50 && y > h / 2 - 30 && y < h / 2 + 30 && levelSelectPage > 0) {
@@ -571,7 +2885,7 @@
       if (col >= 0 && col < cols && row >= 0 && row < rows) {
         const idx = row * cols + col;
         const level = levelSelectPage * levelsPerPage + idx;
-        if (level < LEVELS.length) {
+        if (level < getCurrentPack().levels.length) {
           return level;
         }
       }
@@ -586,19 +2900,185 @@
       const now = performance.now();
       const w = window.innerWidth;
       const h = window.innerHeight;
-      const level = LEVELS[state.currentLevel];
+      const level = getCurrentLevel();
       const palette = PALETTES[level.palette];
 
       // Clear with background color (target color = tileA)
       ctx.fillStyle = palette.bg;
       ctx.fillRect(0, 0, w, h);
 
-      if (state.showingLevelSelect) {
+      if (state.transitioning && state.transition) {
+        const outDuration = 360;
+        const inDuration = 420;
+        if (state.transition.kind === 'toLevel') {
+          if (state.transition.phase === 'out') {
+            const t = easeInOut((now - state.transition.startTime) / outDuration);
+            renderLevelSelect(0, 1 - t);
+            if (t >= 1) {
+              loadLevel(state.transition.toLevel, state.currentPack);
+              state.showingLevelSelect = false;
+              state.transition.phase = 'in';
+              state.transition.startTime = now;
+            }
+          } else if (state.transition.phase === 'in') {
+            const t = easeInOut((now - state.transition.startTime) / inDuration);
+            ctx.save();
+            ctx.globalAlpha = t;
+            renderGrid(now);
+            if (isInvalidState()) {
+              renderInvalidOverlay();
+            }
+            renderMoveBorder(now);
+            ctx.restore();
+            renderControls((1 - t) * -18, t);
+            if (state.showingWin) {
+              renderWinOverlay(now);
+            }
+            if (t >= 1) {
+              state.transitioning = false;
+              state.transition = null;
+            }
+          }
+        } else if (state.transition.kind === 'toMenu') {
+          const t = easeInOut((now - state.transition.startTime) / outDuration);
+          ctx.save();
+          ctx.globalAlpha = 1 - t;
+          renderGrid(now);
+          if (isInvalidState()) {
+            renderInvalidOverlay();
+          }
+          renderMoveBorder(now);
+          renderControls(0, 1);
+          ctx.restore();
+          renderLevelSelect(0, t);
+          if (t >= 1) {
+            state.transitioning = false;
+            state.transition = null;
+            state.showingPackSelect = false;
+            state.showingLevelSelect = true;
+          }
+        } else if (state.transition.kind === 'toPackLevels') {
+          const t = easeInOut((now - state.transition.startTime) / outDuration);
+          renderPackSelect(1 - t);
+          renderLevelSelect(0, t);
+          if (t >= 1) {
+            state.transitioning = false;
+            state.transition = null;
+            state.showingPackSelect = false;
+            state.showingLevelSelect = true;
+          }
+        } else if (state.transition.kind === 'toPackSelect') {
+          const t = easeInOut((now - state.transition.startTime) / outDuration);
+          renderLevelSelect(0, 1 - t);
+          renderPackSelect(t);
+          if (t >= 1) {
+            state.transitioning = false;
+            state.transition = null;
+            state.showingPackSelect = true;
+            state.showingLevelSelect = false;
+          }
+        } else if (state.transition.kind === 'toDailySelect') {
+          const t = easeInOut((now - state.transition.startTime) / outDuration);
+          renderPackSelect(1 - t);
+          renderDailySelect(t);
+          if (t >= 1) {
+            state.transitioning = false;
+            state.transition = null;
+            state.showingPackSelect = false;
+            state.showingDailySelect = true;
+          }
+        } else if (state.transition.kind === 'toPackSelectFromDaily') {
+          const t = easeInOut((now - state.transition.startTime) / outDuration);
+          renderDailySelect(1 - t);
+          renderPackSelect(t);
+          if (t >= 1) {
+            state.transitioning = false;
+            state.transition = null;
+            state.showingPackSelect = true;
+            state.showingDailySelect = false;
+          }
+        } else if (state.transition.kind === 'toDailyLevel') {
+          if (state.transition.phase === 'out') {
+            const t = easeInOut((now - state.transition.startTime) / outDuration);
+            renderDailySelect(0, 1 - t);
+            if (t >= 1) {
+              loadDailyLevel(state.transition.toLevel);
+              state.transition.phase = 'in';
+              state.transition.startTime = now;
+            }
+          } else if (state.transition.phase === 'in') {
+            const t = easeInOut((now - state.transition.startTime) / inDuration);
+            ctx.save();
+            ctx.globalAlpha = t;
+            renderGrid(now);
+            if (isInvalidState()) {
+              renderInvalidOverlay();
+            }
+            renderMoveBorder(now);
+            ctx.restore();
+            renderControls((1 - t) * -18, t);
+            if (state.showingWin) {
+              renderWinOverlay(now);
+            }
+            if (t >= 1) {
+              state.transitioning = false;
+              state.transition = null;
+            }
+          }
+        } else if (state.transition.kind === 'toDailySelectFromGame') {
+          const t = easeInOut((now - state.transition.startTime) / outDuration);
+          ctx.save();
+          ctx.globalAlpha = 1 - t;
+          renderGrid(now);
+          if (isInvalidState()) {
+            renderInvalidOverlay();
+          }
+          renderMoveBorder(now);
+          renderControls(0, 1);
+          ctx.restore();
+          renderDailySelect(t);
+          if (t >= 1) {
+            state.transitioning = false;
+            state.transition = null;
+            state.showingDailySelect = true;
+            state.playingDaily = false;
+          }
+        } else if (state.transition.kind === 'toAchievements') {
+          const t = easeInOut((now - state.transition.startTime) / outDuration);
+          renderPackSelect(1 - t);
+          renderAchievements(t);
+          if (t >= 1) {
+            state.transitioning = false;
+            state.transition = null;
+            state.showingPackSelect = false;
+            state.showingAchievements = true;
+          }
+        } else if (state.transition.kind === 'toPackSelectFromAchievements') {
+          const t = easeInOut((now - state.transition.startTime) / outDuration);
+          renderAchievements(1 - t);
+          renderPackSelect(t);
+          if (t >= 1) {
+            state.transitioning = false;
+            state.transition = null;
+            state.showingPackSelect = true;
+            state.showingAchievements = false;
+          }
+        }
+      } else if (state.showingPackSelect) {
+        renderPackSelect();
+      } else if (state.showingDailySelect) {
+        renderDailySelect();
+      } else if (state.showingAchievements) {
+        renderAchievements();
+      } else if (state.showingLevelSelect) {
         renderLevelSelect();
       } else {
         renderGrid(now);
-        renderTapsRemaining();
-        renderCornerIcons();
+        if (isInvalidState()) {
+          renderInvalidOverlay();
+        }
+        renderMoveBorder(now);
+        renderControls(0, 1);
 
         if (state.showingWin) {
           renderWinOverlay(now);
@@ -612,9 +3092,55 @@
     }
 
     function renderGrid(now) {
-      const level = LEVELS[state.currentLevel];
+      const level = getCurrentLevel();
       const palette = PALETTES[level.palette];
       const gridSize = level.gridSize;
+
+      function buildRoundedRectPath(rx, ry, rw, rh, radii) {
+        const [tl, tr, br, bl] = radii;
+        ctx.beginPath();
+        ctx.moveTo(rx + tl, ry);
+        ctx.lineTo(rx + rw - tr, ry);
+        if (tr > 0) {
+          ctx.arcTo(rx + rw, ry, rx + rw, ry + tr, tr);
+        }
+        ctx.lineTo(rx + rw, ry + rh - br);
+        if (br > 0) {
+          ctx.arcTo(rx + rw, ry + rh, rx + rw - br, ry + rh, br);
+        }
+        ctx.lineTo(rx + bl, ry + rh);
+        if (bl > 0) {
+          ctx.arcTo(rx, ry + rh, rx, ry + rh - bl, bl);
+        }
+        ctx.lineTo(rx, ry + tl);
+        if (tl > 0) {
+          ctx.arcTo(rx, ry, rx + tl, ry, tl);
+        }
+        ctx.closePath();
+      }
+
+      function drawRoundedRectFill(rx, ry, rw, rh, radii) {
+        buildRoundedRectPath(rx, ry, rw, rh, radii);
+        ctx.fill();
+      }
+
+      function drawRoundedRectStroke(rx, ry, rw, rh, radii) {
+        buildRoundedRectPath(rx, ry, rw, rh, radii);
+        ctx.stroke();
+      }
+
+      function blendColors(color1, color2, t) {
+        const r1 = parseInt(color1.slice(1, 3), 16);
+        const g1 = parseInt(color1.slice(3, 5), 16);
+        const b1 = parseInt(color1.slice(5, 7), 16);
+        const r2 = parseInt(color2.slice(1, 3), 16);
+        const g2 = parseInt(color2.slice(3, 5), 16);
+        const b2 = parseInt(color2.slice(5, 7), 16);
+        const rm = Math.round(r1 + (r2 - r1) * t);
+        const gm = Math.round(g1 + (g2 - g1) * t);
+        const bm = Math.round(b1 + (b2 - b1) * t);
+        return `rgb(${rm},${gm},${bm})`;
+      }
 
       for (let r = 0; r < gridSize; r++) {
         for (let c = 0; c < gridSize; c++) {
@@ -625,59 +3151,32 @@
           const centerX = x + layout.cellSize / 2;
           const centerY = y + layout.cellSize / 2;
 
-          // Get slide animation for this cell (active or pending)
+          // Get animations for this cell (active or pending)
           let slideAnim = null;
+          let hintAnim = null;
+          let echoHitAnim = null;
+          let echoFireAnim = null;
+          let dotAnim = null;
 
           for (const anim of animations) {
-            if (anim.row === r && anim.col === c && anim.type === 'flip') {
+            if (anim.row === r && anim.col === c) {
               const elapsed = now - anim.startTime;
-              if (elapsed < anim.duration) {
+              if (anim.type === 'flip' && elapsed < anim.duration) {
                 slideAnim = { elapsed, anim };
+              } else if (anim.type === 'hint' && elapsed >= 0 && elapsed < anim.duration) {
+                hintAnim = { elapsed, anim };
+              } else if (anim.type === 'echo-hit' && elapsed >= 0 && elapsed < anim.duration) {
+                echoHitAnim = { elapsed, anim };
+              } else if (anim.type === 'echo-fire' && elapsed >= 0 && elapsed < anim.duration) {
+                echoFireAnim = { elapsed, anim };
+              } else if (anim.type === 'dot' && elapsed >= 0) {
+                dotAnim = { elapsed, anim };
               }
             }
           }
 
           // Draw cell with pulse compression animation
           const baseSize = layout.cellSize;
-
-          // Helper to draw rect with individual corner radii [tl, tr, br, bl]
-          function drawRoundedRectCorners(rx, ry, rw, rh, radii) {
-            const [tl, tr, br, bl] = radii;
-            ctx.beginPath();
-            ctx.moveTo(rx + tl, ry);
-            ctx.lineTo(rx + rw - tr, ry);
-            if (tr > 0) {
-              ctx.arcTo(rx + rw, ry, rx + rw, ry + tr, tr);
-            }
-            ctx.lineTo(rx + rw, ry + rh - br);
-            if (br > 0) {
-              ctx.arcTo(rx + rw, ry + rh, rx + rw - br, ry + rh, br);
-            }
-            ctx.lineTo(rx + bl, ry + rh);
-            if (bl > 0) {
-              ctx.arcTo(rx, ry + rh, rx, ry + rh - bl, bl);
-            }
-            ctx.lineTo(rx, ry + tl);
-            if (tl > 0) {
-              ctx.arcTo(rx, ry, rx + tl, ry, tl);
-            }
-            ctx.closePath();
-            ctx.fill();
-          }
-
-          // Helper to blend two hex colors
-          function blendColors(color1, color2, t) {
-            const r1 = parseInt(color1.slice(1, 3), 16);
-            const g1 = parseInt(color1.slice(3, 5), 16);
-            const b1 = parseInt(color1.slice(5, 7), 16);
-            const r2 = parseInt(color2.slice(1, 3), 16);
-            const g2 = parseInt(color2.slice(3, 5), 16);
-            const b2 = parseInt(color2.slice(5, 7), 16);
-            const rm = Math.round(r1 + (r2 - r1) * t);
-            const gm = Math.round(g1 + (g2 - g1) * t);
-            const bm = Math.round(b1 + (b2 - b1) * t);
-            return `rgb(${rm},${gm},${bm})`;
-          }
 
           // Get current display parity for this cell
           let displayParity = cell.parity;
@@ -725,41 +3224,161 @@
 
             // Draw scaled rounded cell
             ctx.fillStyle = displayColor;
-            drawRoundedRectCorners(x + offsetX, y + offsetY, scaledSize, scaledSize, [animRadius, animRadius, animRadius, animRadius]);
+            drawRoundedRectFill(x + offsetX, y + offsetY, scaledSize, scaledSize, [animRadius, animRadius, animRadius, animRadius]);
           } else {
             // No animation - draw simple rectangle
             ctx.fillStyle = displayParity === 0 ? palette.tileA : palette.tileB;
             ctx.fillRect(Math.floor(x), Math.floor(y), Math.ceil(baseSize), Math.ceil(baseSize));
           }
+
+          if (cell.dot === 1) {
+            let dotAlpha = 0.9;
+            let dotScale = 1;
+            if (dotAnim) {
+              const t = Math.min(1, dotAnim.elapsed / dotAnim.anim.duration);
+              dotAlpha = 0.9 * (1 - t);
+              dotScale = 1 - t * 0.35;
+              if (t >= 1) {
+                cell.dot = 0;
+                state.stats.dotsCleared += 1;
+                updateAchievements();
+                saveProgress();
+              }
+            }
+            if (cell.dot === 1) {
+              const dotRadius = Math.max(3, baseSize * 0.12) * dotScale;
+              ctx.beginPath();
+              ctx.arc(centerX, centerY, dotRadius, 0, Math.PI * 2);
+              ctx.fillStyle = hexToRgba(palette.dot, dotAlpha);
+              ctx.fill();
+            }
+          }
+
+          if (cell.block === 1) {
+            const blockSize = Math.max(6, baseSize * 0.22);
+            ctx.strokeStyle = hexToRgba(palette.tileB, 0.7);
+            ctx.lineWidth = Math.max(1.5, baseSize * 0.04);
+            ctx.strokeRect(centerX - blockSize / 2, centerY - blockSize / 2, blockSize, blockSize);
+          }
+
+          if (cell.wind === 1) {
+            const triSize = Math.max(8, baseSize * 0.26);
+            const dir = cell.windDir % 4;
+            const windColor = displayParity === 0 ? palette.tileB : palette.tileA;
+            ctx.save();
+            ctx.translate(centerX, centerY);
+            ctx.rotate(dir * (Math.PI / 2));
+            ctx.beginPath();
+            ctx.moveTo(0, -triSize * 0.6);
+            ctx.lineTo(triSize * 0.5, triSize * 0.4);
+            ctx.lineTo(-triSize * 0.5, triSize * 0.4);
+            ctx.closePath();
+            ctx.fillStyle = hexToRgba(windColor, 0.75);
+            ctx.fill();
+            ctx.restore();
+          }
+
+          if (cell.echo === 1) {
+            const echoR = Math.max(5, baseSize * 0.18);
+            ctx.strokeStyle = hexToRgba(palette.tileB, 0.55);
+            ctx.lineWidth = Math.max(1.2, baseSize * 0.03);
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, echoR, 0, Math.PI * 2);
+            ctx.stroke();
+          }
+
+          if (echoHitAnim) {
+            const t = echoHitAnim.elapsed / echoHitAnim.anim.duration;
+            const pulse = Math.sin(t * Math.PI);
+            const inset = baseSize * (0.12 - 0.03 * pulse);
+            const radius = baseSize * 0.18;
+            ctx.fillStyle = hexToRgba(palette.tileB, 0.05 + pulse * 0.12);
+            drawRoundedRectFill(x + inset, y + inset, baseSize - inset * 2, baseSize - inset * 2, [radius, radius, radius, radius]);
+            ctx.strokeStyle = hexToRgba(palette.tileB, 0.18 + pulse * 0.5);
+            ctx.lineWidth = Math.max(1.2, baseSize * 0.04);
+            drawRoundedRectStroke(x + inset, y + inset, baseSize - inset * 2, baseSize - inset * 2, [radius, radius, radius, radius]);
+          }
+
+          if (echoFireAnim) {
+            const t = echoFireAnim.elapsed / echoFireAnim.anim.duration;
+            const pulse = Math.sin(t * Math.PI);
+            const inset = Math.max(2, baseSize * (0.14 - 0.1 * t));
+            const radius = baseSize * 0.18;
+            ctx.fillStyle = hexToRgba(palette.tileB, 0.02 + (1 - t) * 0.08);
+            drawRoundedRectFill(x + inset, y + inset, baseSize - inset * 2, baseSize - inset * 2, [radius, radius, radius, radius]);
+            ctx.strokeStyle = hexToRgba(palette.tileB, 0.55 * (1 - t) + 0.1 * pulse);
+            ctx.lineWidth = Math.max(1.1, baseSize * 0.04);
+            drawRoundedRectStroke(x + inset, y + inset, baseSize - inset * 2, baseSize - inset * 2, [radius, radius, radius, radius]);
+          }
+
+          if (hintAnim) {
+            const t = hintAnim.elapsed / hintAnim.anim.duration;
+            const pulses = hintAnim.anim.pulses || 2;
+            const wave = Math.sin(t * Math.PI * 2 * pulses);
+            const intensity = Math.max(0, wave);
+            const inset = baseSize * 0.08;
+            const radius = baseSize * 0.18;
+            ctx.fillStyle = hexToRgba(palette.dot, 0.08 + intensity * 0.18);
+            drawRoundedRectFill(x + inset, y + inset, baseSize - inset * 2, baseSize - inset * 2, [radius, radius, radius, radius]);
+            ctx.strokeStyle = hexToRgba(palette.dot, 0.2 + intensity * 0.7);
+            ctx.lineWidth = Math.max(2, baseSize * 0.06);
+            drawRoundedRectStroke(x + inset, y + inset, baseSize - inset * 2, baseSize - inset * 2, [radius, radius, radius, radius]);
+          }
         }
       }
     }
 
-    function renderTapsRemaining() {
+    function renderInvalidOverlay() {
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.18)';
+      ctx.fillRect(layout.gridX, layout.gridY, layout.gridSize, layout.gridSize);
+    }
+
+    function renderMoveBorder(now) {
       const w = window.innerWidth;
-      const level = LEVELS[state.currentLevel];
+      const level = getCurrentLevel();
       const palette = PALETTES[level.palette];
 
-      // Draw taps remaining as dots at bottom center
-      const dotRadius = 8;
-      const dotSpacing = 24;
-      const totalTaps = level.tapsRequired;
-      const totalWidth = (totalTaps - 1) * dotSpacing;
-      const startX = w / 2 - totalWidth / 2;
-      const dotY = layout.gridY + layout.gridSize + 30;
+      const totalMoves = level.tapsRequired;
+      if (totalMoves <= 0) return;
 
-      for (let i = 0; i < totalTaps; i++) {
-        ctx.beginPath();
-        ctx.arc(startX + i * dotSpacing, dotY, dotRadius, 0, Math.PI * 2);
-        // Filled for remaining, hollow for used
-        if (i < state.tapsRemaining) {
-          ctx.fillStyle = palette.dot;
-          ctx.fill();
-        } else {
-          ctx.strokeStyle = hexToRgba(palette.dot, 0.3);
-          ctx.lineWidth = 2;
-          ctx.stroke();
+      const barHeight = Math.max(3, layout.cellSize * 0.06);
+      const barY = layout.gridY + layout.gridSize + 14;
+      const barX = layout.gridX;
+      const barWidth = layout.gridSize;
+      const gap = Math.min(8, Math.max(2, barHeight * 0.5));
+      const totalGap = gap * (totalMoves - 1);
+      const segmentWidth = Math.max(4, (barWidth - totalGap) / totalMoves);
+
+      for (let i = 0; i < totalMoves; i++) {
+        const remaining = i < state.tapsRemaining;
+        let segAlpha = remaining ? 0.9 : 0.08;
+        let scale = 1;
+
+        let moveAnim = null;
+        for (const anim of animations) {
+          if (anim.type === 'move' && anim.index === i) {
+            const elapsed = now - anim.startTime;
+            if (elapsed >= 0 && elapsed < anim.duration) {
+              moveAnim = { elapsed, anim };
+              break;
+            }
+          }
         }
+
+        if (moveAnim && !remaining) {
+          const t = moveAnim.elapsed / moveAnim.anim.duration;
+          const pulse = Math.sin(t * Math.PI);
+          scale = 1 - 0.15 * pulse;
+          segAlpha = segAlpha + (0.35 - segAlpha) * pulse;
+        }
+
+        const scaledWidth = segmentWidth * scale;
+        const scaledHeight = barHeight * scale;
+        const x = barX + i * (segmentWidth + gap) + (segmentWidth - scaledWidth) / 2;
+        const y = barY + (barHeight - scaledHeight) / 2;
+
+        ctx.fillStyle = hexToRgba(remaining ? palette.tileB : palette.tileA, segAlpha);
+        ctx.fillRect(x, y, scaledWidth, scaledHeight);
       }
 
       // Show level number and grid size
@@ -769,122 +3388,268 @@
       ctx.textBaseline = 'middle';
       ctx.fillText(`Level ${state.currentLevel + 1}  •  ${level.gridSize}×${level.gridSize}`, w / 2, layout.gridY - 20);
 
-      // Show message if out of taps but not solved
-      if (state.tapsRemaining === 0 && !state.animating) {
-        // Check if solved
-        let solved = true;
-        for (let r = 0; r < level.gridSize && solved; r++) {
-          for (let c = 0; c < level.gridSize && solved; c++) {
-            if (state.grid[r][c].parity !== 0) solved = false;
-          }
-        }
-        if (!solved) {
-          ctx.fillStyle = hexToRgba('#e74c3c', 0.8);
-          ctx.font = '16px -apple-system, BlinkMacSystemFont, sans-serif';
-          ctx.fillText('Tap undo or reset to try again', w / 2, dotY + 30);
-        }
+      if (isInvalidState()) {
+        const messageY = barY + barHeight + 18;
+        ctx.fillStyle = hexToRgba('#e74c3c', 0.8);
+        ctx.font = '16px -apple-system, BlinkMacSystemFont, sans-serif';
+        ctx.fillText('Tap undo or reset to try again', w / 2, messageY);
       }
     }
 
-    function renderCornerIcons() {
-      const iconSize = 24;
-      const margin = 28;
+    function renderControls(offsetY = 0, alpha = 1) {
+      const level = getCurrentLevel();
+      const palette = PALETTES[level.palette];
       const w = window.innerWidth;
-      const h = window.innerHeight;
-      const bgSize = 44;
 
-      // Draw semi-transparent backgrounds for better visibility
-      ctx.fillStyle = 'rgba(128, 128, 128, 0.25)';
+      ctx.save();
+      ctx.globalAlpha *= alpha;
+      ctx.translate(0, offsetY);
 
-      // Top-left background
-      ctx.beginPath();
-      ctx.arc(margin + iconSize / 2, margin + iconSize / 2, bgSize / 2, 0, Math.PI * 2);
-      ctx.fill();
+      // Buttons
+      const buttons = getControlButtons();
+      ctx.font = '14px -apple-system, BlinkMacSystemFont, sans-serif';
+      ctx.textBaseline = 'middle';
+      for (const btn of buttons) {
+        ctx.fillStyle = hexToRgba(palette.tileB, 0.16);
+        ctx.strokeStyle = hexToRgba(palette.tileB, 0.6);
+        ctx.lineWidth = 1.5;
+        fillRoundedRect(btn.x, btn.y, btn.w, btn.h, 12);
+        strokeRoundedRect(btn.x, btn.y, btn.w, btn.h, 12);
 
-      // Top-right background
-      ctx.beginPath();
-      ctx.arc(w - margin - iconSize / 2, margin + iconSize / 2, bgSize / 2, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Bottom-left background
-      ctx.beginPath();
-      ctx.arc(margin + iconSize / 2, h - margin - iconSize / 2, bgSize / 2, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Icon stroke style - use contrasting color
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
-      ctx.lineWidth = 2.5;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-
-      // Top-left: Grid icon (level select)
-      const gx = margin;
-      const gy = margin;
-      const gs = iconSize / 3;
-      for (let i = 0; i < 3; i++) {
-        for (let j = 0; j < 3; j++) {
-          ctx.strokeRect(gx + j * gs + 1, gy + i * gs + 1, gs - 2, gs - 2);
-        }
+        ctx.fillStyle = hexToRgba(palette.tileB, 0.95);
+        ctx.textAlign = 'center';
+        ctx.fillText(btn.label, btn.x + btn.w / 2, btn.y + btn.h / 2 + 1);
       }
 
-      // Top-right: Refresh icon (reset)
-      const rx = w - margin - iconSize / 2;
-      const ry = margin + iconSize / 2;
-      const rr = iconSize / 2 - 2;
-      ctx.beginPath();
-      ctx.arc(rx, ry, rr, -Math.PI * 0.8, Math.PI * 0.6);
-      ctx.stroke();
-      // Arrow head
-      const arrowX = rx + rr * Math.cos(Math.PI * 0.6);
-      const arrowY = ry + rr * Math.sin(Math.PI * 0.6);
-      ctx.beginPath();
-      ctx.moveTo(arrowX - 4, arrowY - 6);
-      ctx.lineTo(arrowX, arrowY);
-      ctx.lineTo(arrowX + 6, arrowY - 4);
-      ctx.stroke();
-
-      // Bottom-left: Undo arrow
-      const ux = margin + iconSize / 2;
-      const uy = h - margin - iconSize / 2;
-      ctx.beginPath();
-      ctx.moveTo(ux + 8, uy - 6);
-      ctx.lineTo(ux - 4, uy);
-      ctx.lineTo(ux + 8, uy + 6);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(ux - 4, uy);
-      ctx.lineTo(ux + 10, uy);
-      ctx.stroke();
+      ctx.restore();
     }
 
     // Level select pagination
     let levelSelectPage = 0;
-    const levelsPerPage = 20;
+    const levelsPerPage = 30;
+    let achievementsPage = 0;
+    const achievementsPerPage = 10;
 
-    function renderLevelSelect() {
+    function getDailyCardRect() {
+      const w = window.innerWidth;
+      const cardW = Math.min(520, w * 0.82);
+      const cardH = 70;
+      const x = (w - cardW) / 2;
+      const y = 110;
+      return { x, y, w: cardW, h: cardH };
+    }
+
+    function getPackSelectLayout() {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      const cols = 2;
+      const rows = Math.ceil(PACKS.length / cols);
+      const cellW = Math.min(w * 0.42, 220);
+      const cellH = Math.min(h * 0.16, 100);
+      const gridW = cols * cellW + (cols - 1) * 16;
+      const gridH = rows * cellH + (rows - 1) * 16;
+      const startX = (w - gridW) / 2;
+      const dailyRect = getDailyCardRect();
+      const startY = dailyRect.y + dailyRect.h + 30;
+
+      return { cols, rows, cellW, cellH, startX, startY };
+    }
+
+    function getPackSelectHit(x, y) {
+      const layout = getPackSelectLayout();
+      for (let i = 0; i < PACKS.length; i++) {
+        const row = Math.floor(i / layout.cols);
+        const col = i % layout.cols;
+        const rx = layout.startX + col * (layout.cellW + 16);
+        const ry = layout.startY + row * (layout.cellH + 16);
+        if (x >= rx && x <= rx + layout.cellW && y >= ry && y <= ry + layout.cellH) {
+          return i;
+        }
+      }
+      return null;
+    }
+
+    function renderPackSelect(alpha = 1) {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      ctx.save();
+      ctx.globalAlpha *= alpha;
+
+      ctx.fillStyle = '#e7ebf0';
+      ctx.fillRect(0, 0, w, h);
+
+      ctx.fillStyle = '#4b5563';
+      ctx.font = 'bold 20px -apple-system, BlinkMacSystemFont, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('Packs', w / 2, 40);
+
+      const dailyProgress = getDailyProgress();
+      ctx.fillStyle = '#6b7280';
+      ctx.font = '13px -apple-system, BlinkMacSystemFont, sans-serif';
+      ctx.fillText(`Daily streak: ${state.daily.streak} day${state.daily.streak === 1 ? '' : 's'}`, w / 2, 64);
+      ctx.fillText(`Today: ${dailyProgress.doneCount}/${dailyProgress.total} mechanics`, w / 2, 82);
+      ctx.fillText(`${state.achievementsUnlocked.length}/${ACHIEVEMENTS.length} achievements`, w / 2, 100);
+
+      const dailyRect = getDailyCardRect();
+      const dailyComplete = dailyProgress.doneCount === dailyProgress.total;
+      const dailyPalette = PALETTES[2];
+      ctx.fillStyle = dailyComplete ? dailyPalette.tileA : '#f9fafb';
+      fillRoundedRect(dailyRect.x, dailyRect.y, dailyRect.w, dailyRect.h, 16);
+      ctx.strokeStyle = hexToRgba(dailyComplete ? dailyPalette.tileB : '#cbd5e1', 0.9);
+      ctx.lineWidth = 1.5;
+      strokeRoundedRect(dailyRect.x, dailyRect.y, dailyRect.w, dailyRect.h, 16);
+      ctx.fillStyle = dailyComplete ? dailyPalette.tileB : '#111827';
+      ctx.font = 'bold 16px -apple-system, BlinkMacSystemFont, sans-serif';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillText('Daily Mix', dailyRect.x + 16, dailyRect.y + 12);
+      ctx.fillStyle = dailyComplete ? hexToRgba(dailyPalette.tileB, 0.7) : '#6b7280';
+      ctx.font = '12px -apple-system, BlinkMacSystemFont, sans-serif';
+      ctx.fillText('Complete one level in each mechanic', dailyRect.x + 16, dailyRect.y + 34);
+
+      let iconX = dailyRect.x + dailyRect.w - 16 - (dailyProgress.total - 1) * 14;
+      const iconY = dailyRect.y + dailyRect.h / 2 + 10;
+      for (const mech of dailyProgress.mechanics) {
+        const pack = PACK_DEFS.find(p => p.mechanic === mech);
+        const palette = PALETTES[pack ? pack.palette : 0];
+        const done = state.daily.mechanics[mech];
+        ctx.beginPath();
+        ctx.arc(iconX, iconY, 5, 0, Math.PI * 2);
+        ctx.fillStyle = done ? palette.tileA : '#cbd5e1';
+        ctx.fill();
+        ctx.strokeStyle = done ? palette.tileB : '#94a3b8';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        iconX += 14;
+      }
+
+      const achBtn = getAchievementsButtonRect();
+      ctx.fillStyle = '#d1d5db';
+      fillRoundedRect(achBtn.x, achBtn.y, achBtn.w, achBtn.h, 10);
+      ctx.strokeStyle = '#9ca3af';
+      ctx.lineWidth = 1;
+      strokeRoundedRect(achBtn.x, achBtn.y, achBtn.w, achBtn.h, 10);
+      ctx.fillStyle = '#374151';
+      ctx.font = '12px -apple-system, BlinkMacSystemFont, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('Achievements', achBtn.x + achBtn.w / 2, achBtn.y + achBtn.h / 2 + 0.5);
+
+      const layout = getPackSelectLayout();
+      for (let i = 0; i < PACKS.length; i++) {
+        const pack = PACKS[i];
+        const row = Math.floor(i / layout.cols);
+        const col = i % layout.cols;
+        const x = layout.startX + col * (layout.cellW + 16);
+        const y = layout.startY + row * (layout.cellH + 16);
+        const palette = PALETTES[pack.palette];
+        const completed = isPackCompleted(i);
+
+        ctx.fillStyle = completed ? palette.tileA : palette.tileB;
+        fillRoundedRect(x, y, layout.cellW, layout.cellH, 14);
+        ctx.strokeStyle = hexToRgba(completed ? palette.tileB : palette.tileA, 0.6);
+        ctx.lineWidth = 2;
+        strokeRoundedRect(x, y, layout.cellW, layout.cellH, 14);
+
+        ctx.fillStyle = getReadableTextColor(completed ? palette.tileA : palette.tileB);
+        ctx.font = 'bold 16px -apple-system, BlinkMacSystemFont, sans-serif';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+        ctx.fillText(pack.title, x + 14, y + 12);
+
+        ctx.fillStyle = hexToRgba(getReadableTextColor(completed ? palette.tileA : palette.tileB), 0.7);
+        ctx.font = '12px -apple-system, BlinkMacSystemFont, sans-serif';
+        ctx.fillText(pack.subtitle, x + 14, y + 34);
+
+        ctx.fillStyle = hexToRgba(getReadableTextColor(completed ? palette.tileA : palette.tileB), 0.6);
+        ctx.font = '11px -apple-system, BlinkMacSystemFont, sans-serif';
+        ctx.fillText(`${pack.levels.length} levels`, x + 14, y + layout.cellH - 20);
+
+        if (completed) {
+          ctx.strokeStyle = hexToRgba(getReadableTextColor(palette.tileA), 0.6);
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(x + layout.cellW - 34, y + layout.cellH - 26);
+          ctx.lineTo(x + layout.cellW - 26, y + layout.cellH - 18);
+          ctx.lineTo(x + layout.cellW - 14, y + layout.cellH - 30);
+          ctx.stroke();
+        }
+      }
+
+      ctx.restore();
+    }
+
+    function renderLevelSelect(offsetX = 0, alpha = 1) {
       const w = window.innerWidth;
       const h = window.innerHeight;
       const cols = 5;
-      const rows = 4;
-      const cellSize = Math.min(w * 0.9 / cols, h * 0.65 / rows);
+      const rows = 6;
+      const cellSize = Math.min(w * 0.9 / cols, h * 0.72 / rows);
       const gridW = cols * cellSize;
       const gridH = rows * cellSize;
       const startX = (w - gridW) / 2;
       const startY = (h - gridH) / 2 + 20;
 
-      const totalPages = Math.ceil(LEVELS.length / levelsPerPage);
+      const pack = getCurrentPack();
+      const totalPages = Math.max(1, Math.ceil(pack.levels.length / levelsPerPage));
+      levelSelectPage = Math.max(0, Math.min(levelSelectPage, totalPages - 1));
       const startLevel = levelSelectPage * levelsPerPage;
-      const endLevel = Math.min(startLevel + levelsPerPage, LEVELS.length);
+      const endLevel = Math.min(startLevel + levelsPerPage, pack.levels.length);
 
+      ctx.save();
+      ctx.globalAlpha *= alpha;
+      ctx.translate(offsetX, 0);
+
+      const background = '#e7ebf0';
       // Background
-      ctx.fillStyle = PALETTES[0].bg;
+      let pagePalette = PALETTES[pack.levels[startLevel] ? pack.levels[startLevel].palette : pack.palette];
+      const pageSolved = Array.from({ length: endLevel - startLevel }).every((_, idx) => isLevelCompleted(state.currentPack, startLevel + idx));
+      ctx.fillStyle = pageSolved ? pagePalette.tileA : background;
       ctx.fillRect(0, 0, w, h);
 
+      // Packs button
+      const packBtn = getPackButtonRect();
+      ctx.fillStyle = '#d1d5db';
+      fillRoundedRect(packBtn.x, packBtn.y, packBtn.w, packBtn.h, 10);
+      ctx.strokeStyle = '#9ca3af';
+      ctx.lineWidth = 1;
+      strokeRoundedRect(packBtn.x, packBtn.y, packBtn.w, packBtn.h, 10);
+      ctx.fillStyle = '#374151';
+      ctx.font = '12px -apple-system, BlinkMacSystemFont, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('Packs', packBtn.x + packBtn.w / 2, packBtn.y + packBtn.h / 2 + 0.5);
+
+      const groupIndex = levelSelectPage;
+      const groupStart = groupIndex * levelsPerPage + 1;
+      const groupTitle = `${pack.title}  •  ${pack.subtitle}`;
+
       // Title with page info
-      ctx.fillStyle = '#666666';
+      ctx.fillStyle = pageSolved ? pagePalette.tileB : '#4b5563';
       ctx.font = 'bold 20px -apple-system, BlinkMacSystemFont, sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(`Levels ${startLevel + 1}-${endLevel}`, w / 2, startY - 30);
+      ctx.fillText(`${groupTitle}`, w / 2, startY - 40);
+
+      ctx.fillStyle = pageSolved ? hexToRgba(pagePalette.tileB, 0.7) : '#6b7280';
+      ctx.font = '14px -apple-system, BlinkMacSystemFont, sans-serif';
+      ctx.fillText(`Levels ${startLevel + 1}-${endLevel}`, w / 2, startY - 20);
+
+      if (mechanicHas(pack.mechanic, 'dots')) {
+        const badgeText = 'Fire On';
+        ctx.font = '12px -apple-system, BlinkMacSystemFont, sans-serif';
+        const badgePadding = 10;
+        const badgeWidth = ctx.measureText(badgeText).width + badgePadding * 2;
+        const badgeHeight = 22;
+        const badgeX = w / 2 - badgeWidth / 2;
+        const badgeY = startY - 66;
+        ctx.fillStyle = pageSolved ? pagePalette.tileB : '#111827';
+        fillRoundedRect(badgeX, badgeY, badgeWidth, badgeHeight, 11);
+        ctx.fillStyle = pageSolved ? pagePalette.tileA : '#f9fafb';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(badgeText, badgeX + badgeWidth / 2, badgeY + badgeHeight / 2 + 0.5);
+      }
 
       // Level cells
       for (let i = startLevel; i < endLevel; i++) {
@@ -895,25 +3660,51 @@
         const y = startY + row * cellSize + 4;
         const size = cellSize - 8;
 
-        const level = LEVELS[i];
-        const palette = PALETTES[level.palette];
-        const completed = state.completedLevels.includes(i);
+        const level = pack.levels[i];
+        const completed = isLevelCompleted(state.currentPack, i);
+        const palette = pageSolved ? pagePalette : PALETTES[level.palette];
 
         // Cell background
-        ctx.fillStyle = completed ? palette.tileA : palette.tileB;
+        const fill = completed ? palette.tileA : palette.tileB;
+        ctx.fillStyle = fill;
         ctx.fillRect(x, y, size, size);
 
+        // Border for contrast
+        ctx.strokeStyle = hexToRgba(completed ? palette.tileB : palette.tileA, 0.7);
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x, y, size, size);
+
         // Level number
-        ctx.fillStyle = completed ? '#ffffff' : '#555555';
+        ctx.fillStyle = getReadableTextColor(fill);
         ctx.font = 'bold 16px -apple-system, BlinkMacSystemFont, sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(String(i + 1), x + size / 2, y + size / 2);
 
-        // Small indicator for taps required
-        ctx.fillStyle = hexToRgba('#666666', 0.5);
-        ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
-        ctx.fillText(`${level.tapsRequired} tap${level.tapsRequired > 1 ? 's' : ''}`, x + size / 2, y + size - 10);
+        if (!completed) {
+          // Small indicator for taps required
+          ctx.fillStyle = hexToRgba(getReadableTextColor(fill), 0.7);
+          ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
+          ctx.fillText(`${level.tapsRequired} tap${level.tapsRequired > 1 ? 's' : ''}`, x + size / 2, y + size - 10);
+        } else {
+          // Solved checkmark (small, bottom)
+          ctx.strokeStyle = hexToRgba(getReadableTextColor(fill), 0.5);
+          ctx.lineWidth = 1.4;
+          ctx.lineCap = 'round';
+          ctx.beginPath();
+          ctx.moveTo(x + size * 0.44, y + size * 0.80);
+          ctx.lineTo(x + size * 0.48, y + size * 0.85);
+          ctx.lineTo(x + size * 0.56, y + size * 0.77);
+          ctx.stroke();
+        }
+
+        if (level.hasDots) {
+          const dotR = 4;
+          ctx.beginPath();
+          ctx.arc(x + size - 10, y + 10, dotR, 0, Math.PI * 2);
+          ctx.fillStyle = hexToRgba(palette.dot, 0.9);
+          ctx.fill();
+        }
       }
 
       // Page navigation arrows
@@ -943,6 +3734,256 @@
         ctx.fillStyle = p === levelSelectPage ? '#666666' : '#cccccc';
         ctx.fill();
       }
+
+      ctx.restore();
+    }
+
+    function getDailySelectLayout() {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      const pack = getDailyPack();
+      const count = pack.levels.length;
+      const cols = Math.min(4, count);
+      const rows = Math.ceil(count / cols);
+      const maxGridW = w * 0.8;
+      const maxGridH = h * 0.5;
+      const cellSize = Math.min(maxGridW / cols, maxGridH / rows);
+      const gridW = cols * cellSize;
+      const gridH = rows * cellSize;
+      const startX = (w - gridW) / 2;
+      const startY = (h - gridH) / 2 + 20;
+      return { cols, rows, cellSize, gridW, gridH, startX, startY };
+    }
+
+    function getDailySelectHit(x, y) {
+      const layout = getDailySelectLayout();
+      const col = Math.floor((x - layout.startX) / layout.cellSize);
+      const row = Math.floor((y - layout.startY) / layout.cellSize);
+      if (col >= 0 && col < layout.cols && row >= 0 && row < layout.rows) {
+        const idx = row * layout.cols + col;
+        if (idx < getDailyPack().levels.length) {
+          return idx;
+        }
+      }
+      return null;
+    }
+
+    function renderDailySelect(offsetX = 0, alpha = 1) {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      const pack = getDailyPack();
+      const layout = getDailySelectLayout();
+      const date = new Date();
+      const dateLabel = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+
+      ctx.save();
+      ctx.globalAlpha *= alpha;
+      ctx.translate(offsetX, 0);
+
+      ctx.fillStyle = '#e7ebf0';
+      ctx.fillRect(0, 0, w, h);
+
+      const backBtn = getPackButtonRect();
+      ctx.fillStyle = '#d1d5db';
+      fillRoundedRect(backBtn.x, backBtn.y, backBtn.w, backBtn.h, 10);
+      ctx.strokeStyle = '#9ca3af';
+      ctx.lineWidth = 1;
+      strokeRoundedRect(backBtn.x, backBtn.y, backBtn.w, backBtn.h, 10);
+      ctx.fillStyle = '#374151';
+      ctx.font = '12px -apple-system, BlinkMacSystemFont, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('Packs', backBtn.x + backBtn.w / 2, backBtn.y + backBtn.h / 2 + 0.5);
+
+      ctx.fillStyle = '#4b5563';
+      ctx.font = 'bold 20px -apple-system, BlinkMacSystemFont, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('Daily Mix', w / 2, 40);
+      ctx.fillStyle = '#6b7280';
+      ctx.font = '13px -apple-system, BlinkMacSystemFont, sans-serif';
+      ctx.fillText(`${dateLabel} • ${pack.levels.length} levels`, w / 2, 64);
+
+      const progress = getDailyProgress();
+      ctx.font = '12px -apple-system, BlinkMacSystemFont, sans-serif';
+      ctx.fillText(`Complete all mechanics for your streak`, w / 2, 84);
+      ctx.fillText(`Today: ${progress.doneCount}/${progress.total}`, w / 2, 102);
+
+      for (let i = 0; i < pack.levels.length; i++) {
+        const level = pack.levels[i];
+        const row = Math.floor(i / layout.cols);
+        const col = i % layout.cols;
+        const x = layout.startX + col * layout.cellSize + 6;
+        const y = layout.startY + row * layout.cellSize + 6;
+        const size = layout.cellSize - 12;
+        const palette = PALETTES[level.palette];
+        const completed = state.daily.mechanics[level.mechanic];
+
+        ctx.fillStyle = completed ? palette.tileA : palette.tileB;
+        ctx.fillRect(x, y, size, size);
+        ctx.strokeStyle = hexToRgba(completed ? palette.tileB : palette.tileA, 0.7);
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x, y, size, size);
+
+        ctx.fillStyle = getReadableTextColor(completed ? palette.tileA : palette.tileB);
+        ctx.font = 'bold 16px -apple-system, BlinkMacSystemFont, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(String(i + 1), x + size / 2, y + size / 2 - 4);
+
+        ctx.fillStyle = hexToRgba(getReadableTextColor(completed ? palette.tileA : palette.tileB), 0.7);
+        ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
+        const mechLabel = MECHANIC_LABELS[level.mechanic] || level.mechanic;
+        ctx.fillText(mechLabel.toUpperCase(), x + size / 2, y + size - 12);
+
+        if (completed) {
+          ctx.strokeStyle = hexToRgba(getReadableTextColor(palette.tileA), 0.5);
+          ctx.lineWidth = 1.4;
+          ctx.lineCap = 'round';
+          ctx.beginPath();
+          ctx.moveTo(x + size * 0.44, y + size * 0.78);
+          ctx.lineTo(x + size * 0.48, y + size * 0.83);
+          ctx.lineTo(x + size * 0.56, y + size * 0.75);
+          ctx.stroke();
+        }
+
+        if (level.hasDots) {
+          const dotR = 4;
+          ctx.beginPath();
+          ctx.arc(x + size - 10, y + 10, dotR, 0, Math.PI * 2);
+          ctx.fillStyle = hexToRgba(palette.dot, 0.9);
+          ctx.fill();
+        }
+      }
+
+      ctx.restore();
+    }
+
+    function renderAchievements(alpha = 1) {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      ctx.save();
+      ctx.globalAlpha *= alpha;
+
+      ctx.fillStyle = '#e7ebf0';
+      ctx.fillRect(0, 0, w, h);
+
+      const backBtn = getAchievementsBackRect();
+      ctx.fillStyle = '#d1d5db';
+      fillRoundedRect(backBtn.x, backBtn.y, backBtn.w, backBtn.h, 10);
+      ctx.strokeStyle = '#9ca3af';
+      ctx.lineWidth = 1;
+      strokeRoundedRect(backBtn.x, backBtn.y, backBtn.w, backBtn.h, 10);
+      ctx.fillStyle = '#374151';
+      ctx.font = '12px -apple-system, BlinkMacSystemFont, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('Back', backBtn.x + backBtn.w / 2, backBtn.y + backBtn.h / 2 + 0.5);
+
+      ctx.fillStyle = '#4b5563';
+      ctx.font = 'bold 20px -apple-system, BlinkMacSystemFont, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('Achievements', w / 2, 40);
+
+      const progress = getDailyProgress();
+      ctx.fillStyle = '#6b7280';
+      ctx.font = '13px -apple-system, BlinkMacSystemFont, sans-serif';
+      ctx.fillText(`Daily streak: ${state.daily.streak} day${state.daily.streak === 1 ? '' : 's'}`, w / 2, 68);
+      ctx.fillText('Complete one level in each mechanic to keep the streak.', w / 2, 88);
+
+      const mechRadius = 6;
+      const mechGap = 18;
+      const mechTotal = progress.total;
+      let mechX = w / 2 - (mechTotal - 1) * mechGap / 2;
+      const mechY = 112;
+      for (const mech of progress.mechanics) {
+        const pack = PACK_DEFS.find(p => p.mechanic === mech);
+        const palette = PALETTES[pack ? pack.palette : 0];
+        const done = state.daily.mechanics[mech];
+        ctx.beginPath();
+        ctx.arc(mechX, mechY, mechRadius, 0, Math.PI * 2);
+        ctx.fillStyle = done ? palette.tileA : '#cbd5e1';
+        ctx.fill();
+        ctx.strokeStyle = done ? palette.tileB : '#94a3b8';
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+        mechX += mechGap;
+      }
+
+      ctx.fillStyle = '#6b7280';
+      ctx.font = '12px -apple-system, BlinkMacSystemFont, sans-serif';
+      ctx.fillText(`Today: ${progress.doneCount}/${progress.total} mechanics`, w / 2, 130);
+
+      const totalPages = Math.max(1, Math.ceil(ACHIEVEMENTS.length / achievementsPerPage));
+      achievementsPage = Math.max(0, Math.min(achievementsPage, totalPages - 1));
+      const startIndex = achievementsPage * achievementsPerPage;
+      const endIndex = Math.min(startIndex + achievementsPerPage, ACHIEVEMENTS.length);
+      const list = ACHIEVEMENTS.slice(startIndex, endIndex);
+
+      const cardW = Math.min(w * 0.86, 560);
+      const cardH = 46;
+      const cardGap = 10;
+      const startX = (w - cardW) / 2;
+      const startY = 160;
+
+      list.forEach((ach, idx) => {
+        const y = startY + idx * (cardH + cardGap);
+        const unlocked = isAchievementUnlocked(ach.id);
+        ctx.fillStyle = unlocked ? '#f9fafb' : '#d1d5db';
+        fillRoundedRect(startX, y, cardW, cardH, 12);
+        ctx.strokeStyle = unlocked ? '#cbd5f5' : '#9ca3af';
+        ctx.lineWidth = 1;
+        strokeRoundedRect(startX, y, cardW, cardH, 12);
+
+        ctx.fillStyle = unlocked ? '#111827' : '#6b7280';
+        ctx.font = 'bold 13px -apple-system, BlinkMacSystemFont, sans-serif';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+        ctx.fillText(ach.title, startX + 12, y + 9);
+
+        ctx.fillStyle = unlocked ? '#4b5563' : '#7b8794';
+        ctx.font = '11px -apple-system, BlinkMacSystemFont, sans-serif';
+        ctx.fillText(ach.desc, startX + 12, y + 26);
+
+        if (unlocked) {
+          ctx.strokeStyle = '#10b981';
+          ctx.lineWidth = 1.8;
+          ctx.lineCap = 'round';
+          ctx.beginPath();
+          ctx.moveTo(startX + cardW - 26, y + 24);
+          ctx.lineTo(startX + cardW - 20, y + 30);
+          ctx.lineTo(startX + cardW - 12, y + 18);
+          ctx.stroke();
+        }
+      });
+
+      if (totalPages > 1) {
+        ctx.fillStyle = '#666666';
+        ctx.font = 'bold 30px -apple-system, BlinkMacSystemFont, sans-serif';
+        ctx.textBaseline = 'middle';
+
+        if (achievementsPage > 0) {
+          ctx.textAlign = 'left';
+          ctx.fillText('‹', 20, h / 2);
+        }
+        if (achievementsPage < totalPages - 1) {
+          ctx.textAlign = 'right';
+          ctx.fillText('›', w - 20, h / 2);
+        }
+
+        const dotY = h - 28;
+        const dotSpacing = 15;
+        const dotsStartX = w / 2 - (totalPages - 1) * dotSpacing / 2;
+        for (let p = 0; p < totalPages; p++) {
+          ctx.beginPath();
+          ctx.arc(dotsStartX + p * dotSpacing, dotY, p === achievementsPage ? 5 : 3, 0, Math.PI * 2);
+          ctx.fillStyle = p === achievementsPage ? '#666666' : '#cccccc';
+          ctx.fill();
+        }
+      }
+
+      ctx.restore();
     }
 
     function renderWinOverlay(now) {
@@ -962,7 +4003,7 @@
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        const isLastLevel = state.currentLevel === LEVELS.length - 1;
+        const isLastLevel = state.currentLevel === getCurrentPack().levels.length - 1;
         const message = isLastLevel ? 'Congratulations!' : 'Level Complete!';
         ctx.fillText(message, w / 2, h / 2 - 20);
 
@@ -981,10 +4022,18 @@
       resizeCanvas();
       window.addEventListener('resize', resizeCanvas);
 
-      // Load saved progress or start fresh
-      if (!loadProgress()) {
-        loadLevel(0);
-      }
+      // Load progress and always return to main menu on open
+      loadProgress();
+      if (!state.stats) state.stats = createDefaultStats();
+      if (!state.daily) state.daily = createDefaultDaily();
+      ensureDailyState();
+      updateAchievements();
+      loadLevel(0, 0);
+      state.showingPackSelect = true;
+      state.showingLevelSelect = false;
+      state.showingDailySelect = false;
+      state.playingDaily = false;
+      levelSelectPage = 0;
 
       // Input events
       canvas.addEventListener('pointerdown', handlePointerDown);
