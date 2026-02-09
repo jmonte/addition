@@ -2195,8 +2195,9 @@
     ];
 
     const CORE_TUTORIAL_COPY = [
-      ['Tap a cell', 'flips row and column'],
-      ['Match all tiles', 'to win the level'],
+      ['Welcome to Parity', 'Match tiles to the background'],
+      ['Each tap flips', 'its row and column'],
+      ['Use limited taps', 'Clear the board to win'],
     ];
 
     function tutorialPalette(mechanic) {
@@ -2588,6 +2589,12 @@
       animating: false,
       transitioning: false,
       transition: null,
+      showingLoading: false,
+      loadingStart: 0,
+      loadingFrames: null,
+      loadingDismissed: false,
+      loadingFadeStart: 0,
+      loadingTapShown: false,
     };
 
     // Animation State
@@ -2798,6 +2805,23 @@
         }
       }
       return false;
+    }
+
+    function getPackSolvedCount(packIndex) {
+      const pack = PACKS[packIndex];
+      const levelCount = getPackLevelCount(pack);
+      if (levelCount === 0) return 0;
+      let completed = 0;
+      for (const key of state.completedLevels) {
+        const parts = key.split(':');
+        if (parts.length !== 2) continue;
+        const idx = parseInt(parts[0], 10);
+        if (idx === packIndex) {
+          completed += 1;
+          if (completed >= levelCount) return levelCount;
+        }
+      }
+      return completed;
     }
 
     function indexToKey(globalIndex) {
@@ -3158,6 +3182,7 @@
       const solution = [
         { row: 1, col: 1 },
         { row: 3, col: 3 },
+        { row: 0, col: 2 },
       ];
       const grid = buildGridFromSolution(gridSize, solution, { mechanic: 'classic' });
       state.tutorialLevel = {
@@ -3990,6 +4015,7 @@
       if (state.transitioning || state.showingPackSelect || state.showingLevelSelect || state.showingDailySelect || state.showingAchievements || state.showingTutorials) {
         return;
       }
+      if (state.showingLoading) return;
       const cell = screenToGrid(pointerStart.x, pointerStart.y);
       if (cell) {
         pointerDownCell = cell;
@@ -4000,6 +4026,14 @@
     function handlePointerUp(e) {
       e.preventDefault();
       if (!pointerStart) return;
+      if (state.showingLoading) {
+        if (!state.loadingDismissed) {
+          state.loadingDismissed = true;
+          state.loadingFadeStart = performance.now();
+        }
+        pointerStart = null;
+        return;
+      }
 
       const pos = e.changedTouches ?
         { x: e.changedTouches[0].clientX - canvas.getBoundingClientRect().left,
@@ -4077,6 +4111,7 @@
         }
         return;
       }
+      if (state.showingLoading) return;
       if (state.showingPackSelect) {
         const dailyRect = getDailyCardRect();
         if (x >= dailyRect.x && x <= dailyRect.x + dailyRect.w && y >= dailyRect.y && y <= dailyRect.y + dailyRect.h) {
@@ -4253,6 +4288,11 @@
         return;
       }
 
+      const isCoreTutorial = state.tutorialMode && state.tutorialKind === 'core';
+      if (isCoreTutorial) {
+        return;
+      }
+
       // Check control buttons
       const control = getControlHit(x, y);
       if (control === 'levelSelect') {
@@ -4350,6 +4390,7 @@
       // Clear background
       ctx.fillStyle = baseBg;
       ctx.fillRect(0, 0, w, h);
+
 
       if (state.transitioning && state.transition) {
         const outDuration = 360;
@@ -4555,6 +4596,10 @@
       animations = animations.filter(a => now < a.startTime + a.duration);
 
       renderTutorialOverlay(now);
+
+      if (state.showingLoading) {
+        renderLoadingOverlay(now);
+      }
 
       requestAnimationFrame(render);
     }
@@ -4921,6 +4966,7 @@
     }
 
     function renderControls(offsetY = 0, alpha = 1) {
+      if (state.tutorialMode && state.tutorialKind === 'core') return;
       const level = getCurrentLevel();
       const palette = PALETTES[level.palette];
       const w = window.innerWidth;
@@ -5130,13 +5176,11 @@
         ctx.textBaseline = 'top';
         ctx.fillText(pack.title, x + 14, y + 12);
 
-        ctx.fillStyle = hexToRgba(getReadableTextColor(completed ? palette.tileA : palette.tileB), 0.7);
-        ctx.font = '12px -apple-system, BlinkMacSystemFont, sans-serif';
-        ctx.fillText(pack.subtitle, x + 14, y + 34);
-
         ctx.fillStyle = hexToRgba(getReadableTextColor(completed ? palette.tileA : palette.tileB), 0.6);
-        ctx.font = '11px -apple-system, BlinkMacSystemFont, sans-serif';
-        ctx.fillText(`${getPackLevelCount(pack)} levels`, x + 14, y + layout.cellH - 20);
+        ctx.font = '12px -apple-system, BlinkMacSystemFont, sans-serif';
+        const solvedCount = getPackSolvedCount(i);
+        const totalCount = getPackLevelCount(pack);
+        ctx.fillText(`${solvedCount} / ${totalCount} levels`, x + 14, y + layout.cellH - 24);
 
         if (completed) {
           ctx.strokeStyle = hexToRgba(getReadableTextColor(palette.tileA), 0.6);
@@ -5739,6 +5783,190 @@
       ctx.restore();
     }
 
+    function getLoadingFrames() {
+      if (state.loadingFrames) return state.loadingFrames;
+      const gridSize = 5;
+      const tapSequence = [
+        { row: 1, col: 1 },
+        { row: 3, col: 3 },
+      ];
+      const baseGrid = buildGridFromSolution(gridSize, tapSequence, { mechanic: 'classic' });
+      const stepOne = deepCopy(baseGrid);
+      applyTapToGrid(stepOne, tapSequence[0].row, tapSequence[0].col, gridSize, 'classic', null, null);
+      const stepTwo = deepCopy(stepOne);
+      applyTapToGrid(stepTwo, tapSequence[1].row, tapSequence[1].col, gridSize, 'classic', null, null);
+      state.loadingFrames = { gridSize, frames: [baseGrid, stepOne, stepTwo], taps: tapSequence };
+      return state.loadingFrames;
+    }
+
+    function renderLoadingOverlay(now) {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      const palette = PALETTES[0];
+      ctx.save();
+      const stepDuration = 900;
+      const secondTapDelay = 200;
+      const replayDelay = 500;
+      const cycleDuration = stepDuration + secondTapDelay + stepDuration + replayDelay;
+      const fadeDuration = 900;
+      const elapsed = now - state.loadingStart;
+      const fadeT = state.loadingDismissed
+        ? Math.min(1, (now - state.loadingFadeStart) / fadeDuration)
+        : 0;
+      const overlayAlpha = 1 - fadeT;
+      ctx.globalAlpha *= overlayAlpha;
+
+      const frames = getLoadingFrames();
+      const gridSize = frames.gridSize;
+      const iconSize = Math.min(w, h) * 0.28;
+      const cellSize = iconSize / gridSize;
+      const gridX = (w - iconSize) / 2;
+      const gridY = (h - iconSize) / 2 - 12;
+
+      ctx.fillStyle = palette.bg;
+      ctx.fillRect(0, 0, w, h);
+      const cycleTime = elapsed % cycleDuration;
+      const stepOneEnd = stepDuration;
+      const pauseEnd = stepOneEnd + secondTapDelay;
+      const stepTwoEnd = pauseEnd + stepDuration;
+      const phase = cycleTime < stepOneEnd ? 'step1'
+        : (cycleTime < pauseEnd ? 'pause1'
+          : (cycleTime < stepTwoEnd ? 'step2' : 'pause2'));
+      const phaseElapsed = phase === 'step1'
+        ? cycleTime
+        : (phase === 'step2' ? Math.max(0, cycleTime - pauseEnd) : 0);
+      const phaseT = phase === 'step1' || phase === 'step2'
+        ? Math.max(0, Math.min(1, phaseElapsed / stepDuration))
+        : 0;
+      const grid = phase === 'step1' ? frames.frames[0]
+        : (phase === 'pause1' ? frames.frames[1]
+          : (phase === 'step2' ? frames.frames[1] : frames.frames[2]));
+      const nextGrid = phase === 'step1' ? frames.frames[1]
+        : (phase === 'step2' ? frames.frames[2] : grid);
+      if (!state.loadingTapShown && elapsed >= stepDuration) {
+        state.loadingTapShown = true;
+      }
+      const showTap = phase === 'step1' && !state.loadingTapShown;
+      const tapCell = phase === 'step1' ? frames.taps[0] : (phase === 'step2' ? frames.taps[1] : null);
+      const maxRowDist = tapCell ? Math.max(tapCell.col, gridSize - 1 - tapCell.col) : 1;
+      const maxColDist = tapCell ? Math.max(tapCell.row, gridSize - 1 - tapCell.row) : 1;
+      const maxDist = Math.max(1, Math.max(maxRowDist, maxColDist));
+      const waveProgress = easeInOut(phaseT);
+      const wavePulse = Math.sin(phaseT * Math.PI);
+
+      const blendColors = (color1, color2, t) => {
+        const r1 = parseInt(color1.slice(1, 3), 16);
+        const g1 = parseInt(color1.slice(3, 5), 16);
+        const b1 = parseInt(color1.slice(5, 7), 16);
+        const r2 = parseInt(color2.slice(1, 3), 16);
+        const g2 = parseInt(color2.slice(3, 5), 16);
+        const b2 = parseInt(color2.slice(5, 7), 16);
+        const rm = Math.round(r1 + (r2 - r1) * t);
+        const gm = Math.round(g1 + (g2 - g1) * t);
+        const bm = Math.round(b1 + (b2 - b1) * t);
+        return `rgb(${rm},${gm},${bm})`;
+      };
+
+      for (let r = 0; r < gridSize; r++) {
+        for (let c = 0; c < gridSize; c++) {
+          const cell = grid[r][c];
+          const nextCell = nextGrid[r][c];
+          const x = Math.floor(gridX + c * cellSize);
+          const y = Math.floor(gridY + r * cellSize);
+          let displayColor = cell.parity === 0 ? palette.tileA : palette.tileB;
+          if (tapCell && (r === tapCell.row || c === tapCell.col)) {
+            const dist = r === tapCell.row ? Math.abs(c - tapCell.col) : Math.abs(r - tapCell.row);
+            const start = dist / maxDist;
+            const span = 0.22;
+            const localT = Math.max(0, Math.min(1, (waveProgress - start) / span));
+            const prevColor = cell.parity === 0 ? palette.tileA : palette.tileB;
+            const nextColor = nextCell.parity === 0 ? palette.tileA : palette.tileB;
+            if (prevColor !== nextColor) {
+              displayColor = blendColors(prevColor, nextColor, localT);
+            }
+          }
+          ctx.fillStyle = displayColor;
+          ctx.fillRect(x, y, Math.ceil(cellSize), Math.ceil(cellSize));
+        }
+      }
+
+      if (tapCell) {
+        const pulse = Math.sin(phaseT * Math.PI);
+        const inset = cellSize * (0.08 + 0.05 * pulse);
+        const x = gridX + tapCell.col * cellSize;
+        const y = gridY + tapCell.row * cellSize;
+        if (showTap) {
+          ctx.strokeStyle = hexToRgba(palette.tileB, 0.75);
+          ctx.lineWidth = Math.max(2, cellSize * 0.12);
+          ctx.strokeRect(x + inset, y + inset, cellSize - inset * 2, cellSize - inset * 2);
+
+          const pressT = Math.min(1, phaseT / 0.5);
+          const pressRadius = cellSize * (0.24 - pressT * 0.08);
+          const pressAlpha = 0.6 * (1 - pressT);
+          ctx.beginPath();
+          ctx.arc(x + cellSize / 2, y + cellSize / 2, pressRadius, 0, Math.PI * 2);
+          ctx.fillStyle = hexToRgba(palette.tileB, pressAlpha);
+          ctx.fill();
+        }
+
+        const wavePos = Math.min(maxDist + 0.5, waveProgress * (maxDist + 0.5));
+        const band = 0.5;
+
+        const drawWaveCell = (r, c, dist) => {
+          const delta = Math.abs(dist - wavePos);
+          if (delta > band) return;
+          const intensity = (1 - delta / band) * (0.4 + 0.6 * wavePulse);
+          ctx.fillStyle = hexToRgba(palette.tileB, 0.15 + 0.35 * intensity);
+          const fx = Math.floor(gridX + c * cellSize);
+          const fy = Math.floor(gridY + r * cellSize);
+          ctx.fillRect(fx, fy, Math.ceil(cellSize), Math.ceil(cellSize));
+        };
+
+        for (let c = 0; c < gridSize; c++) {
+          const dist = Math.abs(c - tapCell.col);
+          drawWaveCell(tapCell.row, c, dist);
+        }
+        for (let r = 0; r < gridSize; r++) {
+          const dist = Math.abs(r - tapCell.row);
+          if (r === tapCell.row) continue;
+          drawWaveCell(r, tapCell.col, dist);
+        }
+
+        // Fill-up trail along row/column as the wave passes
+        const fillAlpha = 0.08 + 0.18 * wavePulse;
+        ctx.fillStyle = hexToRgba(palette.tileB, fillAlpha);
+        for (let c = 0; c < gridSize; c++) {
+          const dist = Math.abs(c - tapCell.col);
+          if (dist <= wavePos) {
+            const fx = Math.floor(gridX + c * cellSize);
+            const fy = Math.floor(gridY + tapCell.row * cellSize);
+            ctx.fillRect(fx, fy, Math.ceil(cellSize), Math.ceil(cellSize));
+          }
+        }
+        for (let r = 0; r < gridSize; r++) {
+          if (r === tapCell.row) continue;
+          const dist = Math.abs(r - tapCell.row);
+          if (dist <= wavePos) {
+            const fx = Math.floor(gridX + tapCell.col * cellSize);
+            const fy = Math.floor(gridY + r * cellSize);
+            ctx.fillRect(fx, fy, Math.ceil(cellSize), Math.ceil(cellSize));
+          }
+        }
+      }
+
+      ctx.fillStyle = '#f8fafc';
+      ctx.font = '16px -apple-system, BlinkMacSystemFont, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('Tap to continue', w / 2, gridY + iconSize + 24);
+
+      ctx.restore();
+
+      if (state.loadingDismissed && fadeT >= 1) {
+        state.showingLoading = false;
+      }
+    }
+
     // ============================================
     // INITIALIZATION
     // ============================================
@@ -5753,6 +5981,12 @@
       if (!state.stats) state.stats = createDefaultStats();
       if (!state.daily) state.daily = createDefaultDaily();
       ensureDailyState();
+      state.showingLoading = true;
+      state.loadingStart = performance.now();
+      state.loadingFrames = null;
+      state.loadingDismissed = false;
+      state.loadingFadeStart = 0;
+      state.loadingTapShown = false;
       updateAchievements();
       state.currentPack = 0;
       state.currentLevel = 0;
