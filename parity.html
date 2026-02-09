@@ -56,7 +56,7 @@
       for (let r = 0; r < gridSize; r++) {
         grid[r] = [];
         for (let c = 0; c < gridSize; c++) {
-          grid[r][c] = { parity: 0, dot: 0, block: 0, echo: 0, wind: 0, windDir: 0 };
+          grid[r][c] = { parity: 0, dot: 0, block: 0, echo: 0, wind: 0, windDir: 0, water: 0 };
         }
       }
 
@@ -87,14 +87,33 @@
         }
       }
 
+      const waterCells = options.waterCells || null;
+      if (waterCells) {
+        for (const cell of waterCells) {
+          grid[cell.row][cell.col].water = 1;
+        }
+      }
+
       for (const tap of solution) {
         applyTapToGrid(grid, tap.row, tap.col, gridSize, options.mechanic || 'classic', blockMask, echoState);
+      }
+
+      if (blockMask) {
+        for (const block of blockMask) {
+          grid[block.row][block.col].block = 1;
+        }
       }
 
       if (windCells) {
         for (const cell of windCells) {
           grid[cell.row][cell.col].wind = 1;
           grid[cell.row][cell.col].windDir = cell.dir;
+        }
+      }
+
+      if (waterCells) {
+        for (const cell of waterCells) {
+          grid[cell.row][cell.col].water = 1;
         }
       }
 
@@ -199,11 +218,12 @@
       return counts;
     }
 
-    function buildToggleCountsForMechanic(gridSize, solution, mechanic, blocks = null, winds = null) {
+    function buildToggleCountsForMechanic(gridSize, solution, mechanic, blocks = null, winds = null, waters = null) {
       const hasBlocks = mechanicHas(mechanic, 'blocks');
       const hasWind = mechanicHas(mechanic, 'wind');
+      const hasWater = mechanicHas(mechanic, 'water');
 
-      if (!hasBlocks && !hasWind) {
+      if (!hasBlocks && !hasWind && !hasWater) {
         return buildToggleCounts(gridSize, solution);
       }
 
@@ -214,7 +234,7 @@
         grid[r] = [];
         for (let c = 0; c < gridSize; c++) {
           counts[r][c] = 0;
-          grid[r][c] = { block: 0, wind: 0, windDir: 0 };
+          grid[r][c] = { block: 0, wind: 0, windDir: 0, water: 0 };
         }
       }
 
@@ -230,8 +250,27 @@
           grid[cell.row][cell.col].windDir = cell.dir;
         }
       }
+      if (waters) {
+        for (const cell of waters) {
+          grid[cell.row][cell.col].water = 1;
+        }
+      }
 
-      const isBlocked = (r, c) => hasBlocks && grid[r][c].block === 1;
+      const blockKeys = new Set();
+      if (blocks && Array.isArray(blocks)) {
+        for (const cell of blocks) {
+          blockKeys.add(`${cell.row},${cell.col}`);
+        }
+      }
+      const isBlocked = (r, c) => hasBlocks && blockKeys.has(`${r},${c}`);
+      const consumeBlock = (r, c) => {
+        if (!hasBlocks) return false;
+        const key = `${r},${c}`;
+        if (!blockKeys.has(key)) return false;
+        blockKeys.delete(key);
+        grid[r][c].block = 0;
+        return true;
+      };
 
       for (const tap of solution) {
         if (hasBlocks && isBlocked(tap.row, tap.col)) {
@@ -239,6 +278,7 @@
         }
 
         const windQueue = [];
+        const waterQueue = [];
         const queueWind = (r, c) => {
           if (!hasWind) return;
           if (grid[r][c].wind !== 1) return;
@@ -247,10 +287,17 @@
           grid[r][c].windDir = 0;
           windQueue.push({ row: r, col: c, dir });
         };
+        const queueWater = (r, c) => {
+          if (!hasWater) return;
+          if (grid[r][c].water !== 1) return;
+          grid[r][c].water = 0;
+          waterQueue.push({ row: r, col: c });
+        };
 
         const toggleCell = (r, c) => {
           counts[r][c] += 1;
           queueWind(r, c);
+          queueWater(r, c);
         };
 
         const processWindQueue = () => {
@@ -262,6 +309,7 @@
             let c = wind.col + delta.dc;
             while (r >= 0 && r < gridSize && c >= 0 && c < gridSize) {
               if (hasBlocks && isBlocked(r, c)) {
+                consumeBlock(r, c);
                 break;
               }
               toggleCell(r, c);
@@ -271,9 +319,41 @@
           }
         };
 
+        const processWaterQueue = () => {
+          if (!hasWater) return;
+          while (waterQueue.length) {
+            const water = waterQueue.shift();
+            for (let dr = -1; dr <= 1; dr++) {
+              for (let dc = -1; dc <= 1; dc++) {
+                if (dr === 0 && dc === 0) continue;
+                const r = water.row + dr;
+                const c = water.col + dc;
+                if (r < 0 || r >= gridSize || c < 0 || c >= gridSize) continue;
+                if (hasBlocks && isBlocked(r, c)) {
+                  consumeBlock(r, c);
+                  continue;
+                }
+                toggleCell(r, c);
+              }
+            }
+          }
+        };
+
+        const processSpecialQueues = () => {
+          while (windQueue.length || waterQueue.length) {
+            processWaterQueue();
+            processWindQueue();
+          }
+        };
+
         if (hasWind && grid[tap.row][tap.col].wind === 1) {
           toggleCell(tap.row, tap.col);
-          processWindQueue();
+          processSpecialQueues();
+          continue;
+        }
+        if (hasWater && grid[tap.row][tap.col].water === 1) {
+          toggleCell(tap.row, tap.col);
+          processSpecialQueues();
           continue;
         }
 
@@ -281,6 +361,7 @@
 
         for (let c = tap.col - 1; c >= 0; c--) {
           if (isBlocked(tap.row, c)) {
+            consumeBlock(tap.row, c);
             break;
           }
           toggleCell(tap.row, c);
@@ -288,6 +369,7 @@
 
         for (let c = tap.col + 1; c < gridSize; c++) {
           if (isBlocked(tap.row, c)) {
+            consumeBlock(tap.row, c);
             break;
           }
           toggleCell(tap.row, c);
@@ -295,6 +377,7 @@
 
         for (let r = tap.row - 1; r >= 0; r--) {
           if (isBlocked(r, tap.col)) {
+            consumeBlock(r, tap.col);
             break;
           }
           toggleCell(r, tap.col);
@@ -302,30 +385,199 @@
 
         for (let r = tap.row + 1; r < gridSize; r++) {
           if (isBlocked(r, tap.col)) {
+            consumeBlock(r, tap.col);
             break;
           }
           toggleCell(r, tap.col);
         }
 
-        processWindQueue();
+        processSpecialQueues();
       }
 
       return counts;
     }
 
-    function verifyPuzzleSolution(grid, gridSize, solution, mechanic, blocks = null, winds = null) {
-      const counts = buildToggleCountsForMechanic(gridSize, solution, mechanic, blocks, winds);
-      const hasDots = mechanicHas(mechanic, 'dots');
+    function verifyPuzzleSolution(grid, gridSize, solution, mechanic, blocks = null, winds = null, waters = null) {
       for (let r = 0; r < gridSize; r++) {
         for (let c = 0; c < gridSize; c++) {
           const cell = grid[r][c];
-          const toggles = counts[r][c] % 2;
-          if ((cell.parity + toggles) % 2 !== 0) {
+          const elementCount = (cell.block === 1 ? 1 : 0)
+            + (cell.wind === 1 ? 1 : 0)
+            + (cell.water === 1 ? 1 : 0)
+            + (cell.dot === 1 ? 1 : 0)
+            + (cell.echo === 1 ? 1 : 0);
+          if (elementCount > 1) {
             return false;
           }
-          if (hasDots && cell.dot === 1 && counts[r][c] === 0) {
-            return false;
+        }
+      }
+      const sim = deepCopy(grid);
+      const hasBlocks = mechanicHas(mechanic, 'blocks');
+      const hasWind = mechanicHas(mechanic, 'wind');
+      const hasWater = mechanicHas(mechanic, 'water');
+      const hasDots = mechanicHas(mechanic, 'dots');
+      const blockMask = blocks || null;
+      const blockKeys = new Set();
+      if (hasBlocks) {
+        if (blockMask && Array.isArray(blockMask)) {
+          for (const cell of blockMask) {
+            blockKeys.add(`${cell.row},${cell.col}`);
           }
+        } else {
+          for (let r = 0; r < gridSize; r++) {
+            for (let c = 0; c < gridSize; c++) {
+              if (sim[r][c].block === 1) {
+                blockKeys.add(`${r},${c}`);
+              }
+            }
+          }
+        }
+      }
+      const isBlocked = (r, c) => hasBlocks && blockKeys.has(`${r},${c}`);
+      const consumeBlock = (r, c) => {
+        if (!hasBlocks) return false;
+        const key = `${r},${c}`;
+        if (!blockKeys.has(key)) return false;
+        blockKeys.delete(key);
+        sim[r][c].block = 0;
+        return true;
+      };
+
+      for (const tap of solution) {
+        if (hasBlocks && isBlocked(tap.row, tap.col)) {
+          return false;
+        }
+
+        const windQueue = [];
+        const waterQueue = [];
+        const queueWind = (r, c) => {
+          if (!hasWind) return;
+          if (sim[r][c].wind !== 1) return;
+          const dir = sim[r][c].windDir;
+          sim[r][c].wind = 0;
+          sim[r][c].windDir = 0;
+          windQueue.push({ row: r, col: c, dir });
+        };
+        const queueWater = (r, c) => {
+          if (!hasWater) return;
+          if (sim[r][c].water !== 1) return;
+          sim[r][c].water = 0;
+          waterQueue.push({ row: r, col: c });
+        };
+
+        const toggleCell = (r, c) => {
+          sim[r][c].parity = (sim[r][c].parity + 1) % 2;
+          if (hasDots && sim[r][c].dot === 1) {
+            sim[r][c].dot = 0;
+          }
+          queueWind(r, c);
+          queueWater(r, c);
+        };
+
+        const processWindQueue = () => {
+          if (!hasWind) return;
+          while (windQueue.length) {
+            const wind = windQueue.shift();
+            const delta = DIR_VECTORS[wind.dir % 4] || DIR_VECTORS[0];
+            let r = wind.row + delta.dr;
+            let c = wind.col + delta.dc;
+            while (r >= 0 && r < gridSize && c >= 0 && c < gridSize) {
+              if (hasBlocks && isBlocked(r, c)) {
+                consumeBlock(r, c);
+                break;
+              }
+              toggleCell(r, c);
+              r += delta.dr;
+              c += delta.dc;
+            }
+          }
+        };
+
+        const processWaterQueue = () => {
+          if (!hasWater) return;
+          while (waterQueue.length) {
+            const water = waterQueue.shift();
+            for (let dr = -1; dr <= 1; dr++) {
+              for (let dc = -1; dc <= 1; dc++) {
+                if (dr === 0 && dc === 0) continue;
+                const r = water.row + dr;
+                const c = water.col + dc;
+                if (r < 0 || r >= gridSize || c < 0 || c >= gridSize) continue;
+                if (hasBlocks && isBlocked(r, c)) {
+                  consumeBlock(r, c);
+                  continue;
+                }
+                toggleCell(r, c);
+              }
+            }
+          }
+        };
+
+        const processSpecialQueues = () => {
+          while (windQueue.length || waterQueue.length) {
+            processWaterQueue();
+            processWindQueue();
+          }
+        };
+
+        if (hasWind && sim[tap.row][tap.col].wind === 1) {
+          toggleCell(tap.row, tap.col);
+          processSpecialQueues();
+          continue;
+        }
+
+        if (hasWater && sim[tap.row][tap.col].water === 1) {
+          toggleCell(tap.row, tap.col);
+          processSpecialQueues();
+          continue;
+        }
+
+        toggleCell(tap.row, tap.col);
+
+        for (let c = tap.col - 1; c >= 0; c--) {
+          if (hasBlocks && isBlocked(tap.row, c)) {
+            consumeBlock(tap.row, c);
+            break;
+          }
+          toggleCell(tap.row, c);
+        }
+
+        for (let c = tap.col + 1; c < gridSize; c++) {
+          if (hasBlocks && isBlocked(tap.row, c)) {
+            consumeBlock(tap.row, c);
+            break;
+          }
+          toggleCell(tap.row, c);
+        }
+
+        for (let r = tap.row - 1; r >= 0; r--) {
+          if (hasBlocks && isBlocked(r, tap.col)) {
+            consumeBlock(r, tap.col);
+            break;
+          }
+          toggleCell(r, tap.col);
+        }
+
+        for (let r = tap.row + 1; r < gridSize; r++) {
+          if (hasBlocks && isBlocked(r, tap.col)) {
+            consumeBlock(r, tap.col);
+            break;
+          }
+          toggleCell(r, tap.col);
+        }
+
+        processSpecialQueues();
+      }
+
+      for (let r = 0; r < gridSize; r++) {
+        for (let c = 0; c < gridSize; c++) {
+          const cell = sim[r][c];
+          if (cell.parity !== 0) return false;
+          if (hasDots && cell.dot === 1) return false;
+          if (cell.block === 1) return false;
+          if (cell.wind === 1) return false;
+          if (cell.water === 1) return false;
+          if (cell.echo === 1) return false;
         }
       }
       return true;
@@ -349,6 +601,18 @@
       }
 
       return blocks;
+    }
+
+    function collectDotCells(grid) {
+      const dots = [];
+      for (let r = 0; r < grid.length; r++) {
+        for (let c = 0; c < grid[r].length; c++) {
+          if (grid[r][c].dot === 1) {
+            dots.push({ row: r, col: c });
+          }
+        }
+      }
+      return dots;
     }
 
     function buildEchoLayout(gridSize, solution, seed) {
@@ -475,8 +739,14 @@
       return echoes;
     }
 
-    function buildWindLayout(gridSize, solution, seed) {
+    function buildWindLayout(gridSize, solution, seed, forbidden = null, targetOverride = null) {
       const random = createSeededRandom(seed);
+      const forbiddenKeys = new Set();
+      if (forbidden && Array.isArray(forbidden)) {
+        for (const cell of forbidden) {
+          forbiddenKeys.add(`${cell.row},${cell.col}`);
+        }
+      }
       const solutionKeys = new Set(solution.map(tap => `${tap.row},${tap.col}`));
       const solutionList = solution.slice();
       const candidates = [];
@@ -484,6 +754,7 @@
       for (let r = 0; r < gridSize; r++) {
         for (let c = 0; c < gridSize; c++) {
           const key = `${r},${c}`;
+          if (forbiddenKeys.has(key)) continue;
           if (solutionKeys.has(key)) continue;
           candidates.push({ row: r, col: c });
         }
@@ -499,7 +770,7 @@
       shuffle(solutionList);
       shuffle(candidates);
 
-      const targetCount = Math.max(2, Math.min(gridSize + 1, Math.floor(gridSize * 0.6)));
+      const targetCount = targetOverride || Math.max(2, Math.min(gridSize + 1, Math.floor(gridSize * 0.6)));
       const winds = [];
       const used = new Set();
 
@@ -521,10 +792,12 @@
       if (solutionList.length > 0) {
         const tap = solutionList[0];
         const key = `${tap.row},${tap.col}`;
-        const dir = pickWindDir(tap.row, tap.col);
-        if (dir !== null) {
+        if (!forbiddenKeys.has(key)) {
+          const dir = pickWindDir(tap.row, tap.col);
+          if (dir !== null) {
           used.add(key);
           winds.push({ row: tap.row, col: tap.col, dir });
+          }
         }
       }
 
@@ -552,6 +825,84 @@
       return winds;
     }
 
+    function buildWaterLayout(gridSize, solution, seed, forbidden = null, blocks = null, targetOverride = null) {
+      const random = createSeededRandom(seed);
+      const forbiddenKeys = new Set();
+      if (forbidden && Array.isArray(forbidden)) {
+        for (const cell of forbidden) {
+          forbiddenKeys.add(`${cell.row},${cell.col}`);
+        }
+      }
+      const blockKeys = new Set();
+      if (blocks && Array.isArray(blocks)) {
+        for (const cell of blocks) {
+          blockKeys.add(`${cell.row},${cell.col}`);
+        }
+      }
+      const solutionKeys = new Set(solution.map(tap => `${tap.row},${tap.col}`));
+      const solutionList = solution.slice();
+      const candidates = [];
+
+      for (let r = 0; r < gridSize; r++) {
+        for (let c = 0; c < gridSize; c++) {
+          const key = `${r},${c}`;
+          if (forbiddenKeys.has(key)) continue;
+          if (solutionKeys.has(key)) continue;
+          candidates.push({ row: r, col: c });
+        }
+      }
+
+      function shuffle(arr) {
+        for (let i = arr.length - 1; i > 0; i--) {
+          const j = Math.floor(random() * (i + 1));
+          [arr[i], arr[j]] = [arr[j], arr[i]];
+        }
+      }
+
+      const hasFreeNeighbor = (row, col) => {
+        for (let dr = -1; dr <= 1; dr++) {
+          for (let dc = -1; dc <= 1; dc++) {
+            if (dr === 0 && dc === 0) continue;
+            const nr = row + dr;
+            const nc = col + dc;
+            if (nr < 0 || nr >= gridSize || nc < 0 || nc >= gridSize) continue;
+            if (!blockKeys.has(`${nr},${nc}`)) {
+              return true;
+            }
+          }
+        }
+        return false;
+      };
+
+      shuffle(solutionList);
+      shuffle(candidates);
+
+      const targetCount = targetOverride || Math.max(2, Math.min(gridSize + 1, Math.floor(gridSize * 0.6)));
+      const waters = [];
+      const used = new Set();
+
+      if (solutionList.length > 0) {
+        const tap = solutionList[0];
+        const key = `${tap.row},${tap.col}`;
+        if (!forbiddenKeys.has(key) && hasFreeNeighbor(tap.row, tap.col)) {
+          used.add(key);
+          waters.push({ row: tap.row, col: tap.col });
+        }
+      }
+
+      const pool = solutionList.concat(candidates);
+      for (const cell of pool) {
+        if (waters.length >= targetCount) break;
+        const key = `${cell.row},${cell.col}`;
+        if (used.has(key)) continue;
+        if (!hasFreeNeighbor(cell.row, cell.col)) continue;
+        used.add(key);
+        waters.push({ row: cell.row, col: cell.col });
+      }
+
+      return waters;
+    }
+
     function analyzeEchoLayout(gridSize, solution, echoes) {
       const solutionRows = new Set(solution.map(tap => tap.row));
       const solutionCols = new Set(solution.map(tap => tap.col));
@@ -575,10 +926,22 @@
     function applyTapToGrid(grid, row, col, gridSize, mechanic, blockMask, echoState) {
       const hasBlocks = mechanicHas(mechanic, 'blocks');
       const hasWind = mechanicHas(mechanic, 'wind');
+      const hasWater = mechanicHas(mechanic, 'water');
       const hasEcho = mechanicHas(mechanic, 'echo');
-      const isBlocked = (r, c) => {
-        if (!blockMask) return false;
-        return blockMask.some(cell => cell.row === r && cell.col === c);
+      const blockKeys = new Set();
+      if (blockMask && Array.isArray(blockMask)) {
+        for (const cell of blockMask) {
+          blockKeys.add(`${cell.row},${cell.col}`);
+        }
+      }
+      const isBlocked = (r, c) => hasBlocks && blockKeys.has(`${r},${c}`);
+      const consumeBlock = (r, c) => {
+        if (!hasBlocks) return false;
+        const key = `${r},${c}`;
+        if (!blockKeys.has(key)) return false;
+        blockKeys.delete(key);
+        grid[r][c].block = 0;
+        return true;
       };
 
       const isEcho = (r, c) => {
@@ -594,6 +957,7 @@
       }
 
       const windQueue = [];
+      const waterQueue = [];
       const queueWind = (r, c) => {
         if (!hasWind) return;
         if (grid[r][c].wind !== 1) return;
@@ -602,10 +966,17 @@
         grid[r][c].windDir = 0;
         windQueue.push({ row: r, col: c, dir });
       };
+      const queueWater = (r, c) => {
+        if (!hasWater) return;
+        if (grid[r][c].water !== 1) return;
+        grid[r][c].water = 0;
+        waterQueue.push({ row: r, col: c });
+      };
 
       const toggleCell = (r, c) => {
         grid[r][c].parity = (grid[r][c].parity + 1) % 2;
         queueWind(r, c);
+        queueWater(r, c);
       };
 
       const processWindQueue = () => {
@@ -622,13 +993,41 @@
           let r = wind.row + delta.dr;
           let c = wind.col + delta.dc;
           while (r >= 0 && r < gridSize && c >= 0 && c < gridSize) {
-            if (hasBlocks && isBlocked(r, c)) {
-              break;
-            }
+        if (hasBlocks && isBlocked(r, c)) {
+          consumeBlock(r, c);
+          break;
+        }
             toggleCell(r, c);
             r += delta.dr;
             c += delta.dc;
           }
+        }
+      };
+
+      const processWaterQueue = () => {
+        if (!hasWater) return;
+        while (waterQueue.length) {
+          const water = waterQueue.shift();
+          for (let dr = -1; dr <= 1; dr++) {
+            for (let dc = -1; dc <= 1; dc++) {
+              if (dr === 0 && dc === 0) continue;
+              const r = water.row + dr;
+              const c = water.col + dc;
+              if (r < 0 || r >= gridSize || c < 0 || c >= gridSize) continue;
+                if (hasBlocks && isBlocked(r, c)) {
+                  consumeBlock(r, c);
+                  continue;
+                }
+                toggleCell(r, c);
+              }
+            }
+          }
+      };
+
+      const processSpecialQueues = () => {
+        while (windQueue.length || waterQueue.length) {
+          processWaterQueue();
+          processWindQueue();
         }
       };
 
@@ -661,7 +1060,13 @@
 
         if (hasWind && grid[tap.row][tap.col].wind === 1) {
           toggleCell(tap.row, tap.col);
-          processWindQueue();
+          processSpecialQueues();
+          continue;
+        }
+
+        if (hasWater && grid[tap.row][tap.col].water === 1) {
+          toggleCell(tap.row, tap.col);
+          processSpecialQueues();
           continue;
         }
 
@@ -671,6 +1076,7 @@
 
           for (let c = tap.col - 1; c >= 0; c--) {
             if (hasBlocks && isBlocked(tap.row, c)) {
+              consumeBlock(tap.row, c);
               break;
             }
             toggleCell(tap.row, c);
@@ -679,6 +1085,7 @@
 
           for (let c = tap.col + 1; c < gridSize; c++) {
             if (hasBlocks && isBlocked(tap.row, c)) {
+              consumeBlock(tap.row, c);
               break;
             }
             toggleCell(tap.row, c);
@@ -689,6 +1096,7 @@
         const toggleColumnWithBlocks = () => {
           for (let r = tap.row - 1; r >= 0; r--) {
             if (hasBlocks && isBlocked(r, tap.col)) {
+              consumeBlock(r, tap.col);
               break;
             }
             toggleCell(r, tap.col);
@@ -697,6 +1105,7 @@
 
           for (let r = tap.row + 1; r < gridSize; r++) {
             if (hasBlocks && isBlocked(r, tap.col)) {
+              consumeBlock(r, tap.col);
               break;
             }
             toggleCell(r, tap.col);
@@ -706,19 +1115,20 @@
 
         toggleRowWithBlocks();
         toggleColumnWithBlocks();
-        processWindQueue();
+        processSpecialQueues();
       }
     }
 
-    function applyDotsToGrid(grid, gridSize, solution, seed, mechanic = 'dots', blocks = null, winds = null) {
+    function applyDotsToGrid(grid, gridSize, solution, seed, mechanic = 'dots', blocks = null, winds = null, waters = null) {
       const random = createSeededRandom(seed);
-      const toggleCounts = buildToggleCountsForMechanic(gridSize, solution, mechanic, blocks, winds);
+      const toggleCounts = buildToggleCountsForMechanic(gridSize, solution, mechanic, blocks, winds, waters);
       const candidates = [];
       const parityZero = [];
       const parityOne = [];
 
       for (let r = 0; r < gridSize; r++) {
         for (let c = 0; c < gridSize; c++) {
+          if (grid[r][c].block === 1 || grid[r][c].wind === 1 || grid[r][c].water === 1) continue;
           if (toggleCounts[r][c] > 0) {
             const entry = { row: r, col: c };
             candidates.push(entry);
@@ -773,6 +1183,207 @@
       }
 
       return chosen.length;
+    }
+
+    function normalizeElementLayout(grid, gridSize) {
+      const blocks = [];
+      const winds = [];
+      const waters = [];
+      let dotCount = 0;
+      let changed = false;
+
+      for (let r = 0; r < gridSize; r++) {
+        for (let c = 0; c < gridSize; c++) {
+          const cell = grid[r][c];
+          const hasBlock = cell.block === 1;
+          const hasWind = cell.wind === 1;
+          const hasWater = cell.water === 1;
+          const hasDot = cell.dot === 1;
+          const hasEcho = cell.echo === 1;
+          const elementCount = (hasBlock ? 1 : 0) + (hasWind ? 1 : 0) + (hasWater ? 1 : 0) + (hasDot ? 1 : 0) + (hasEcho ? 1 : 0);
+          if (elementCount > 1) {
+            changed = true;
+          }
+
+          if (hasBlock) {
+            if (cell.wind === 1 || cell.water === 1 || cell.dot === 1 || cell.echo === 1) {
+              changed = true;
+            }
+            cell.wind = 0;
+            cell.windDir = 0;
+            cell.water = 0;
+            cell.dot = 0;
+            cell.echo = 0;
+            blocks.push({ row: r, col: c });
+            continue;
+          }
+
+          if (hasWind) {
+            if (cell.water === 1 || cell.dot === 1 || cell.echo === 1) {
+              changed = true;
+            }
+            cell.water = 0;
+            cell.dot = 0;
+            cell.echo = 0;
+            winds.push({ row: r, col: c, dir: cell.windDir });
+            continue;
+          }
+
+          if (hasWater) {
+            if (cell.dot === 1 || cell.echo === 1) {
+              changed = true;
+            }
+            cell.dot = 0;
+            cell.echo = 0;
+            waters.push({ row: r, col: c });
+            continue;
+          }
+
+          if (hasDot) {
+            if (cell.echo === 1) {
+              changed = true;
+            }
+            cell.echo = 0;
+            dotCount += 1;
+          } else if (cell.echo === 1) {
+            cell.echo = 0;
+            changed = true;
+          }
+        }
+      }
+
+      return { blocks, winds, waters, dotCount, changed };
+    }
+
+    function pruneElementOverlaps(blocks, winds, waters) {
+      const blockKeys = new Set();
+      const prunedBlocks = [];
+      if (blocks && Array.isArray(blocks)) {
+        for (const cell of blocks) {
+          const key = `${cell.row},${cell.col}`;
+          if (blockKeys.has(key)) continue;
+          blockKeys.add(key);
+          prunedBlocks.push(cell);
+        }
+      }
+
+      const windKeys = new Set();
+      const prunedWinds = [];
+      if (winds && Array.isArray(winds)) {
+        for (const cell of winds) {
+          const key = `${cell.row},${cell.col}`;
+          if (blockKeys.has(key) || windKeys.has(key)) continue;
+          windKeys.add(key);
+          prunedWinds.push(cell);
+        }
+      }
+
+      const waterKeys = new Set();
+      const prunedWaters = [];
+      if (waters && Array.isArray(waters)) {
+        for (const cell of waters) {
+          const key = `${cell.row},${cell.col}`;
+          if (blockKeys.has(key) || windKeys.has(key) || waterKeys.has(key)) continue;
+          waterKeys.add(key);
+          prunedWaters.push(cell);
+        }
+      }
+
+      return { blocks: prunedBlocks, winds: prunedWinds, waters: prunedWaters };
+    }
+
+    function hasElementOverlap(grid, gridSize) {
+      for (let r = 0; r < gridSize; r++) {
+        for (let c = 0; c < gridSize; c++) {
+          const cell = grid[r][c];
+          const elementCount = (cell.block === 1 ? 1 : 0)
+            + (cell.wind === 1 ? 1 : 0)
+            + (cell.water === 1 ? 1 : 0)
+            + (cell.dot === 1 ? 1 : 0)
+            + (cell.echo === 1 ? 1 : 0);
+          if (elementCount > 1) return true;
+        }
+      }
+      return false;
+    }
+
+    function applyWindCellsToGrid(grid, windCells) {
+      if (!windCells) return;
+      for (const cell of windCells) {
+        const target = grid[cell.row][cell.col];
+        if (!target) continue;
+        target.wind = 1;
+        target.windDir = cell.dir;
+      }
+    }
+
+    function applyWaterCellsToGrid(grid, waterCells) {
+      if (!waterCells) return;
+      for (const cell of waterCells) {
+        const target = grid[cell.row][cell.col];
+        if (!target) continue;
+        target.water = 1;
+      }
+    }
+
+    function finalizePuzzleLayout(puzzle, gridSize, mechanic, seed) {
+      let normalized = normalizeElementLayout(puzzle.grid, gridSize);
+      const solutionKeys = new Set(puzzle.solution.map(tap => `${tap.row},${tap.col}`));
+      const elementCounts = getElementCounts(gridSize, puzzle.solution.length, mechanic);
+
+      puzzle.blocks = mechanicHas(mechanic, 'blocks')
+        ? normalized.blocks.filter(cell => !solutionKeys.has(`${cell.row},${cell.col}`))
+        : [];
+      puzzle.winds = mechanicHas(mechanic, 'wind') ? normalized.winds : [];
+      puzzle.waters = mechanicHas(mechanic, 'water') ? normalized.waters : [];
+      ({ blocks: puzzle.blocks, winds: puzzle.winds, waters: puzzle.waters } = pruneElementOverlaps(puzzle.blocks, puzzle.winds, puzzle.waters));
+
+      if (mechanicHas(mechanic, 'wind') && puzzle.winds.length === 0) {
+        const forbidden = (puzzle.blocks || []).concat(puzzle.waters || []);
+        puzzle.winds = buildWindLayout(gridSize, puzzle.solution, seed + 8080, forbidden, elementCounts.windCount);
+      }
+
+      if (mechanicHas(mechanic, 'water') && puzzle.waters.length === 0) {
+        const forbidden = (puzzle.blocks || []).concat(puzzle.winds || []);
+        puzzle.waters = buildWaterLayout(gridSize, puzzle.solution, seed + 9090, forbidden, puzzle.blocks || [], elementCounts.waterCount);
+      }
+      ({ blocks: puzzle.blocks, winds: puzzle.winds, waters: puzzle.waters } = pruneElementOverlaps(puzzle.blocks, puzzle.winds, puzzle.waters));
+
+      puzzle.grid = buildGridFromSolution(gridSize, puzzle.solution, {
+        mechanic,
+        blocks: puzzle.blocks,
+        windCells: puzzle.winds,
+        waterCells: puzzle.waters,
+      });
+
+      let dotCount = 0;
+      if (mechanicHas(mechanic, 'dots')) {
+        dotCount = applyDotsToGrid(puzzle.grid, gridSize, puzzle.solution, seed + 7070, mechanic, puzzle.blocks, puzzle.winds, puzzle.waters);
+        if (dotCount === 0) {
+          const counts = buildToggleCountsForMechanic(gridSize, puzzle.solution, mechanic, puzzle.blocks, puzzle.winds, puzzle.waters);
+          for (let r = 0; r < gridSize && dotCount === 0; r++) {
+            for (let c = 0; c < gridSize && dotCount === 0; c++) {
+              if (counts[r][c] > 0 && puzzle.grid[r][c].block !== 1 && puzzle.grid[r][c].wind !== 1 && puzzle.grid[r][c].water !== 1) {
+                puzzle.grid[r][c].dot = 1;
+                dotCount = 1;
+              }
+            }
+          }
+        }
+      }
+
+      if (hasElementOverlap(puzzle.grid, gridSize)) {
+        const cleanup = normalizeElementLayout(puzzle.grid, gridSize);
+        puzzle.blocks = mechanicHas(mechanic, 'blocks') ? cleanup.blocks : [];
+        puzzle.winds = mechanicHas(mechanic, 'wind') ? cleanup.winds : [];
+        puzzle.waters = mechanicHas(mechanic, 'water') ? cleanup.waters : [];
+        if (mechanicHas(mechanic, 'dots') && cleanup.dotCount === 0) {
+          dotCount = applyDotsToGrid(puzzle.grid, gridSize, puzzle.solution, seed + 7171, mechanic, puzzle.blocks, puzzle.winds, puzzle.waters);
+        }
+      }
+
+      puzzle.dotsApplied = mechanicHas(mechanic, 'dots') ? dotCount > 0 : puzzle.dotsApplied;
+      return puzzle;
     }
 
     function gridSignatureBigInt(grid) {
@@ -883,6 +1494,7 @@
         const blocks = new Array(n * n);
         const echoes = new Array(n * n);
         const winds = new Array(n * n);
+        const waters = new Array(n * n);
 
         const dirMap = DIR_VECTORS.map(({ dr, dc }) => {
           const [r1, c1] = transform(anchor, anchor, n);
@@ -905,10 +1517,11 @@
             } else {
               winds[idx] = 'n';
             }
+            waters[idx] = cell.water === 1 ? '1' : '0';
           }
         }
 
-        const signature = `${parity.join('')}|${dots.join('')}|${blocks.join('')}|${echoes.join('')}|${winds.join('')}`;
+        const signature = `${parity.join('')}|${dots.join('')}|${blocks.join('')}|${echoes.join('')}|${winds.join('')}|${waters.join('')}`;
         if (best === null || signature < best) {
           best = signature;
         }
@@ -1173,7 +1786,7 @@
       const random = createSeededRandom(seed);
       const strategyNames = Object.keys(placementStrategies);
       let best = null;
-      const attempts = 240;
+      const attempts = 140;
 
       for (let i = 0; i < attempts; i++) {
         const strategy = strategyNames[i % strategyNames.length];
@@ -1213,18 +1826,19 @@
       const random = createSeededRandom(seed);
       const strategyNames = Object.keys(placementStrategies);
       let best = null;
-      const attempts = 240;
+      const attempts = 140;
       const hasBlocks = mechanicHas(mechanic, 'blocks');
       const hasWind = mechanicHas(mechanic, 'wind');
+      const hasWater = mechanicHas(mechanic, 'water');
       const hasDots = mechanicHas(mechanic, 'dots');
+      const elementCounts = getElementCounts(gridSize, taps, mechanic);
 
       for (let i = 0; i < attempts; i++) {
         const strategy = strategyNames[i % strategyNames.length];
         let blocks = null;
         if (hasBlocks) {
-          const blockCount = Math.max(1, Math.min(gridSize + 1, Math.floor(gridSize * 0.7)));
           const blockSeed = seed + i * 97;
-          blocks = buildBlockMask(gridSize, blockSeed, blockCount);
+          blocks = buildBlockMask(gridSize, blockSeed, elementCounts.blockCount);
         }
 
         const solution = placementStrategies[strategy](random, gridSize, taps);
@@ -1233,18 +1847,31 @@
           continue;
         }
 
-        const winds = hasWind ? buildWindLayout(gridSize, solution, seed + i * 619) : null;
+        const winds = hasWind ? buildWindLayout(gridSize, solution, seed + i * 619, blocks, elementCounts.windCount) : null;
         if (hasWind && (!winds || winds.length === 0)) continue;
+        if (hasWind && hasBlocks) {
+          const blockKeys = new Set(blocks.map(cell => `${cell.row},${cell.col}`));
+          if (winds.some(cell => blockKeys.has(`${cell.row},${cell.col}`))) {
+            continue;
+          }
+        }
 
-        const grid = buildGridFromSolution(gridSize, solution, { mechanic, blocks, windCells: winds });
+        const waterForbidden = (blocks || []).concat(winds || []);
+        const waters = hasWater ? buildWaterLayout(gridSize, solution, seed + i * 733, waterForbidden, blocks, elementCounts.waterCount) : null;
+        if (hasWater && (!waters || waters.length === 0)) continue;
+
+        const grid = buildGridFromSolution(gridSize, solution, { mechanic, blocks, windCells: winds, waterCells: waters });
 
         let dotsApplied = false;
         if (hasDots) {
-          applyDotsToGrid(grid, gridSize, solution, seed + i * 424242, mechanic, blocks, winds);
+          const dotCount = applyDotsToGrid(grid, gridSize, solution, seed + i * 424242, mechanic, blocks, winds, waters);
+          if (dotCount === 0) {
+            continue;
+          }
           dotsApplied = true;
         }
 
-        if (!verifyPuzzleSolution(grid, gridSize, solution, mechanic, blocks, winds)) {
+        if (!verifyPuzzleSolution(grid, gridSize, solution, mechanic, blocks, winds, waters)) {
           continue;
         }
 
@@ -1259,9 +1886,9 @@
           score += Math.min(10, uniqueDirs * 2);
         }
         if (!best || score > best.score) {
-          best = { grid, solution, score, signature, blocks, winds, dotsApplied };
-        }
+          best = { grid, solution, score, signature, blocks, winds, waters, dotsApplied };
       }
+    }
 
       if (!best) return null;
       usedSignatures.add(best.signature);
@@ -1271,7 +1898,105 @@
         tapsRequired: taps,
         blocks: best.blocks || [],
         winds: best.winds || [],
+        waters: best.waters || [],
         dotsApplied: !!best.dotsApplied,
+      };
+    }
+
+    function forceGeneratePuzzle(gridSize, taps, seed, mechanic) {
+      const random = createSeededRandom(seed);
+      const solution = placementStrategies.random(random, gridSize, taps);
+      const elementCounts = getElementCounts(gridSize, taps, mechanic);
+      const blocks = mechanicHas(mechanic, 'blocks')
+        ? buildBlockMask(gridSize, seed + 123, elementCounts.blockCount)
+        : null;
+      let winds = mechanicHas(mechanic, 'wind')
+        ? buildWindLayout(gridSize, solution, seed + 456, blocks, elementCounts.windCount)
+        : null;
+      let waters = mechanicHas(mechanic, 'water')
+        ? buildWaterLayout(gridSize, solution, seed + 789, (blocks || []).concat(winds || []), blocks, elementCounts.waterCount)
+        : null;
+
+      if (mechanicHas(mechanic, 'wind') && (!winds || winds.length === 0)) {
+        const candidates = [];
+        for (let r = 0; r < gridSize; r++) {
+          for (let c = 0; c < gridSize; c++) {
+            if ((blocks || []).some(cell => cell.row === r && cell.col === c)) continue;
+            if ((waters || []).some(cell => cell.row === r && cell.col === c)) continue;
+            const dirs = [];
+            if (r > 0) dirs.push(0);
+            if (c < gridSize - 1) dirs.push(1);
+            if (r < gridSize - 1) dirs.push(2);
+            if (c > 0) dirs.push(3);
+            if (dirs.length) {
+              candidates.push({ row: r, col: c, dirs });
+            }
+          }
+        }
+        if (candidates.length) {
+          const choice = candidates[Math.floor(random() * candidates.length)];
+          const dir = choice.dirs[Math.floor(random() * choice.dirs.length)];
+          winds = [{ row: choice.row, col: choice.col, dir }];
+        }
+      }
+
+      if (mechanicHas(mechanic, 'water') && (!waters || waters.length === 0)) {
+        const candidates = [];
+        const blockKeys = new Set((blocks || []).map(cell => `${cell.row},${cell.col}`));
+        for (let r = 0; r < gridSize; r++) {
+          for (let c = 0; c < gridSize; c++) {
+            if (blockKeys.has(`${r},${c}`)) continue;
+            if ((winds || []).some(cell => cell.row === r && cell.col === c)) continue;
+            let hasNeighbor = false;
+            for (let dr = -1; dr <= 1 && !hasNeighbor; dr++) {
+              for (let dc = -1; dc <= 1; dc++) {
+                if (dr === 0 && dc === 0) continue;
+                const nr = r + dr;
+                const nc = c + dc;
+                if (nr < 0 || nr >= gridSize || nc < 0 || nc >= gridSize) continue;
+                if (!blockKeys.has(`${nr},${nc}`)) {
+                  hasNeighbor = true;
+                  break;
+                }
+              }
+            }
+            if (hasNeighbor) {
+              candidates.push({ row: r, col: c });
+            }
+          }
+        }
+        if (candidates.length) {
+          const choice = candidates[Math.floor(random() * candidates.length)];
+          waters = [{ row: choice.row, col: choice.col }];
+        }
+      }
+      const grid = buildGridFromSolution(gridSize, solution, { mechanic, blocks, windCells: winds, waterCells: waters });
+
+      let dotsApplied = false;
+      if (mechanicHas(mechanic, 'dots')) {
+        let dotCount = applyDotsToGrid(grid, gridSize, solution, seed + 999, mechanic, blocks, winds, waters);
+        if (dotCount === 0) {
+          const counts = buildToggleCountsForMechanic(gridSize, solution, mechanic, blocks, winds, waters);
+          for (let r = 0; r < gridSize && dotCount === 0; r++) {
+            for (let c = 0; c < gridSize && dotCount === 0; c++) {
+              if (counts[r][c] > 0 && grid[r][c].block !== 1 && grid[r][c].wind !== 1 && grid[r][c].water !== 1) {
+                grid[r][c].dot = 1;
+                dotCount = 1;
+              }
+            }
+          }
+        }
+        dotsApplied = dotCount > 0;
+      }
+
+      return {
+        grid,
+        solution,
+        tapsRequired: taps,
+        blocks: blocks || [],
+        winds: winds || [],
+        waters: waters || [],
+        dotsApplied,
       };
     }
 
@@ -1279,14 +2004,15 @@
       const random = createSeededRandom(seed);
       const strategyNames = Object.keys(placementStrategies);
       let best = null;
-      const attempts = 240;
+      const attempts = 140;
+      const elementCounts = getElementCounts(gridSize, taps, 'wind');
 
       for (let i = 0; i < attempts; i++) {
         const strategy = strategyNames[i % strategyNames.length];
         const solution = placementStrategies[strategy](random, gridSize, taps);
         if (solution.length !== taps) continue;
 
-        const winds = buildWindLayout(gridSize, solution, seed + i * 619);
+        const winds = buildWindLayout(gridSize, solution, seed + i * 619, null, elementCounts.windCount);
         if (winds.length === 0) continue;
 
         const grid = buildGridFromSolution(gridSize, solution, { mechanic: 'wind', windCells: winds });
@@ -1311,10 +2037,10 @@
     }
 
     function generatePuzzle(gridSize, taps, seed, usedSignatures, mechanic = 'classic') {
-      if (mechanicHas(mechanic, 'echo') && !mechanicHas(mechanic, 'blocks') && !mechanicHas(mechanic, 'wind') && !mechanicHas(mechanic, 'dots')) {
+      if (mechanicHas(mechanic, 'echo') && !mechanicHas(mechanic, 'blocks') && !mechanicHas(mechanic, 'wind') && !mechanicHas(mechanic, 'dots') && !mechanicHas(mechanic, 'water')) {
         return generateEchoPuzzle(gridSize, taps, seed, usedSignatures);
       }
-      if (mechanicHas(mechanic, 'wind') || mechanicHas(mechanic, 'blocks') || mechanicHas(mechanic, 'dots')) {
+      if (mechanicHas(mechanic, 'wind') || mechanicHas(mechanic, 'blocks') || mechanicHas(mechanic, 'dots') || mechanicHas(mechanic, 'water')) {
         return generateComboPuzzle(gridSize, taps, seed, usedSignatures, mechanic);
       }
       if (mechanic === 'wind') {
@@ -1326,15 +2052,15 @@
       const random = createSeededRandom(seed);
       const strategyNames = Object.keys(placementStrategies);
       let best = null;
-      const attempts = 240;
+      const attempts = 140;
 
       for (let i = 0; i < attempts; i++) {
         const strategy = strategyNames[i % strategyNames.length];
         let blocks = null;
         if (mechanic === 'blocks') {
-          const blockCount = Math.max(1, Math.min(gridSize + 1, Math.floor(gridSize * 0.7)));
+          const elementCounts = getElementCounts(gridSize, taps, mechanic);
           const blockSeed = seed + i * 97;
-          blocks = buildBlockMask(gridSize, blockSeed, blockCount);
+          blocks = buildBlockMask(gridSize, blockSeed, elementCounts.blockCount);
         }
 
         const solution = placementStrategies[strategy](random, gridSize, taps);
@@ -1382,14 +2108,71 @@
       ...Array(5).fill({ gridSize: 5, taps: 6 }),
     ];
 
+    function minGridSizeForMechanic(mechanic) {
+      const isAllElements = mechanicHas(mechanic, 'dots')
+        && mechanicHas(mechanic, 'blocks')
+        && mechanicHas(mechanic, 'wind')
+        && mechanicHas(mechanic, 'water');
+      return isAllElements ? 4 : 3;
+    }
+
+    function minTapsForMechanic(mechanic) {
+      const types = ['dots', 'blocks', 'wind', 'water'];
+      const count = types.reduce((sum, type) => sum + (mechanicHas(mechanic, type) ? 1 : 0), 0);
+      if (count >= 4) return 4;
+      if (count === 3) return 3;
+      if (count === 2) return 2;
+      return 1;
+    }
+
+    function elementCountFor(gridSize, taps, mechanic, type) {
+      const baseFactor = type === 'blocks' ? 0.55 : 0.45;
+      const base = Math.max(1, Math.floor(gridSize * baseFactor));
+      const tapCap = Math.max(1, Math.floor(taps * 0.6));
+      let count = Math.min(base, tapCap);
+      const typeCount = ['dots', 'blocks', 'wind', 'water']
+        .reduce((sum, t) => sum + (mechanicHas(mechanic, t) ? 1 : 0), 0);
+      if (typeCount >= 3) {
+        count = Math.max(1, Math.floor(count * 0.85));
+      }
+      return Math.max(1, count);
+    }
+
+    function getElementCounts(gridSize, taps, mechanic) {
+      return {
+        blockCount: mechanicHas(mechanic, 'blocks') ? elementCountFor(gridSize, taps, mechanic, 'blocks') : 0,
+        windCount: mechanicHas(mechanic, 'wind') ? elementCountFor(gridSize, taps, mechanic, 'wind') : 0,
+        waterCount: mechanicHas(mechanic, 'water') ? elementCountFor(gridSize, taps, mechanic, 'water') : 0,
+      };
+    }
+
+    function buildDifficultySequence(base, minGridSize, minTaps, targetCount) {
+      const filtered = base.filter(diff => diff.gridSize >= minGridSize && diff.taps >= minTaps);
+      const source = filtered.length ? filtered : base;
+      const sequence = source.slice(0, targetCount);
+      while (sequence.length < targetCount) {
+        sequence.push(source[sequence.length % source.length]);
+      }
+      return sequence;
+    }
+
     const MECHANIC_LABELS = {
       classic: 'Core',
       dots: 'Fire',
       blocks: 'Earth',
       wind: 'Wind',
+      water: 'Water',
       'dots+wind': 'Fire + Wind',
       'dots+blocks': 'Fire + Earth',
       'blocks+wind': 'Earth + Wind',
+      'dots+blocks+wind': 'Fire + Earth + Wind',
+      'dots+water': 'Fire + Water',
+      'blocks+water': 'Earth + Water',
+      'wind+water': 'Wind + Water',
+      'dots+blocks+water': 'Fire + Earth + Water',
+      'blocks+wind+water': 'Earth + Wind + Water',
+      'dots+wind+water': 'Fire + Wind + Water',
+      'dots+blocks+wind+water': 'Fire + Earth + Wind + Water',
     };
 
     const PACK_DEFS = [
@@ -1397,19 +2180,153 @@
       { id: 'dots', title: 'Fire', subtitle: 'Extinguish embers', mechanic: 'dots', palette: 1 },
       { id: 'blocks', title: 'Earth', subtitle: 'Rock stops flips', mechanic: 'blocks', palette: 2 },
       { id: 'wind', title: 'Wind', subtitle: 'Directional flow', mechanic: 'wind', palette: 3 },
+      { id: 'water', title: 'Water', subtitle: 'Ripple to neighbors', mechanic: 'water', palette: 8 },
       { id: 'fire_wind', title: 'Fire + Wind', subtitle: 'Embers ride the gust', mechanic: 'dots+wind', palette: 4 },
       { id: 'fire_earth', title: 'Fire + Earth', subtitle: 'Embers meet stone', mechanic: 'dots+blocks', palette: 5 },
       { id: 'earth_wind', title: 'Earth + Wind', subtitle: 'Gusts meet stone', mechanic: 'blocks+wind', palette: 6 },
+      { id: 'triad', title: 'Fire + Earth + Wind', subtitle: 'Three forces align', mechanic: 'dots+blocks+wind', palette: 7 },
+      { id: 'water_earth', title: 'Water + Earth', subtitle: 'Ripples meet stone', mechanic: 'blocks+water', palette: 9 },
+      { id: 'water_fire', title: 'Water + Fire', subtitle: 'Steam and embers', mechanic: 'dots+water', palette: 0 },
+      { id: 'water_wind', title: 'Water + Wind', subtitle: 'Currents and gusts', mechanic: 'wind+water', palette: 1 },
+      { id: 'water_earth_fire', title: 'Water + Earth + Fire', subtitle: 'Heat against stone', mechanic: 'dots+blocks+water', palette: 2 },
+      { id: 'water_earth_wind', title: 'Water + Earth + Wind', subtitle: 'Storms over rock', mechanic: 'blocks+wind+water', palette: 3 },
+      { id: 'water_fire_wind', title: 'Water + Fire + Wind', subtitle: 'Steam-borne sparks', mechanic: 'dots+wind+water', palette: 4 },
+      { id: 'quad', title: 'All Elements', subtitle: 'Fire, Earth, Wind, Water', mechanic: 'dots+blocks+wind+water', palette: 5 },
     ];
+
+    const CORE_TUTORIAL_COPY = [
+      ['Tap a cell', 'flips row and column'],
+      ['Match all tiles', 'to win the level'],
+    ];
+
+    function tutorialPalette(mechanic) {
+      const pack = PACK_DEFS.find(p => p.mechanic === mechanic);
+      return pack ? pack.palette : 0;
+    }
+
+    const ELEMENT_TUTORIALS = [
+      {
+        id: 'fire',
+        title: 'Fire',
+        subtitle: 'Embers must be cleared',
+        detail: 'Tap ember tiles to extinguish.',
+        mechanic: 'dots',
+        palette: tutorialPalette('dots'),
+        gridSize: 4,
+        solution: [{ row: 1, col: 1 }, { row: 2, col: 2 }],
+        dots: [{ row: 1, col: 1 }, { row: 2, col: 2 }],
+        steps: [
+          ['Embers sit on tiles', 'Tap to extinguish them'],
+          ['Clear embers and match tiles', 'to finish the level'],
+        ],
+      },
+      {
+        id: 'earth',
+        title: 'Earth',
+        subtitle: 'Stone blocks flips',
+        detail: 'Rocks block waves and then break.',
+        mechanic: 'blocks',
+        palette: tutorialPalette('blocks'),
+        gridSize: 4,
+        solution: [{ row: 1, col: 1 }, { row: 2, col: 2 }],
+        blocks: [{ row: 1, col: 2 }],
+        steps: [
+          ['Rocks stop a wave', 'Then the rock breaks'],
+          ['Plan taps around blocks', 'They split rows and columns'],
+        ],
+      },
+      {
+        id: 'wind',
+        title: 'Wind',
+        subtitle: 'Directional flow',
+        detail: 'Arrows push flips forward.',
+        mechanic: 'wind',
+        palette: tutorialPalette('wind'),
+        gridSize: 4,
+        solution: [{ row: 1, col: 1 }, { row: 2, col: 2 }],
+        winds: [{ row: 1, col: 1, dir: 1 }, { row: 2, col: 2, dir: 2 }],
+        steps: [
+          ['Wind pushes in one direction', 'Tap the arrow to sweep'],
+          ['Aim the flow carefully', 'Gusts reach far tiles'],
+        ],
+      },
+      {
+        id: 'water',
+        title: 'Water',
+        subtitle: 'Ripple to neighbors',
+        detail: 'Splashes affect nearby tiles.',
+        mechanic: 'water',
+        palette: tutorialPalette('water'),
+        gridSize: 4,
+        solution: [{ row: 1, col: 1 }, { row: 2, col: 2 }],
+        waters: [{ row: 1, col: 1 }, { row: 2, col: 2 }],
+        steps: [
+          ['Water ripples to neighbors', 'Tap to splash nearby tiles'],
+          ['Splashes hit diagonals too', 'Use clusters to clear faster'],
+        ],
+      },
+    ];
+
+    const ELEMENT_TUTORIALS_BY_MECH = ELEMENT_TUTORIALS.reduce((acc, tutorial) => {
+      acc[tutorial.mechanic] = tutorial;
+      return acc;
+    }, {});
+
+    function buildElementTutorialLevel(def) {
+      const solution = def.solution.slice();
+      const blocks = def.blocks || [];
+      const winds = def.winds || [];
+      const waters = def.waters || [];
+      let grid = buildGridFromSolution(def.gridSize, solution, {
+        mechanic: def.mechanic,
+        blocks,
+        windCells: winds,
+        waterCells: waters,
+      });
+      if (def.dots) {
+        for (const dot of def.dots) {
+          grid[dot.row][dot.col].dot = 1;
+        }
+      }
+      const isValid = verifyPuzzleSolution(grid, def.gridSize, solution, def.mechanic, blocks, winds, waters);
+      if (!isValid) {
+        const fallbackSeed = 424242 + hashSeed(def.id || def.mechanic || 'tutorial');
+        const fallback = generatePuzzle(def.gridSize, solution.length, fallbackSeed, new Set(), def.mechanic);
+        if (fallback) {
+          return {
+            grid: fallback.grid,
+            solution: fallback.solution,
+            blocks: fallback.blocks || [],
+            winds: fallback.winds || [],
+            waters: fallback.waters || [],
+            hasDots: mechanicHas(def.mechanic, 'dots'),
+          };
+        }
+      }
+      return {
+        grid,
+        solution,
+        blocks,
+        winds,
+        waters,
+        hasDots: mechanicHas(def.mechanic, 'dots'),
+      };
+    }
 
     function generatePackLevels(packIndex, packDef) {
       const levels = [];
       const usedSignatures = new Set();
-      const difficulties = BASE_DIFFICULTIES.slice(0, PACK_LEVEL_COUNT);
+      const difficulties = buildDifficultySequence(
+        BASE_DIFFICULTIES,
+        minGridSizeForMechanic(packDef.mechanic),
+        minTapsForMechanic(packDef.mechanic),
+        PACK_LEVEL_COUNT
+      );
 
       for (let i = 0; i < difficulties.length; i++) {
         const { gridSize, taps } = difficulties[i];
         const baseSeed = 4242 + packIndex * 10000 + i * 131;
+        const elementCounts = getElementCounts(gridSize, taps, packDef.mechanic);
         let puzzle = null;
         for (let attempt = 0; attempt < 6 && !puzzle; attempt++) {
           puzzle = generatePuzzle(gridSize, taps, baseSeed + attempt * 10007, usedSignatures, packDef.mechanic);
@@ -1424,43 +2341,82 @@
             const fallbackSeed = baseSeed + 99999 + fallbackAttempt * 911;
             const fallbackRandom = createSeededRandom(fallbackSeed);
             const solution = placementStrategies.random(fallbackRandom, gridSize, taps);
+            const elementCounts = getElementCounts(gridSize, taps, packDef.mechanic);
             const blocks = mechanicHas(packDef.mechanic, 'blocks')
-              ? buildBlockMask(gridSize, fallbackSeed + 12345, Math.max(1, Math.min(gridSize + 1, Math.floor(gridSize * 0.7))))
+              ? buildBlockMask(gridSize, fallbackSeed + 12345, elementCounts.blockCount)
               : null;
             const winds = mechanicHas(packDef.mechanic, 'wind')
-              ? buildWindLayout(gridSize, solution, fallbackSeed + 31415)
+              ? buildWindLayout(gridSize, solution, fallbackSeed + 31415, blocks, elementCounts.windCount)
               : null;
-            const grid = buildGridFromSolution(gridSize, solution, { mechanic: packDef.mechanic, blocks, windCells: winds });
-            const candidate = { grid, solution, tapsRequired: taps, blocks: blocks || [], winds: winds || [], needsSignature: true };
+            const waters = mechanicHas(packDef.mechanic, 'water')
+              ? buildWaterLayout(gridSize, solution, fallbackSeed + 35555, (blocks || []).concat(winds || []), blocks, elementCounts.waterCount)
+              : null;
+            const grid = buildGridFromSolution(gridSize, solution, { mechanic: packDef.mechanic, blocks, windCells: winds, waterCells: waters });
+            const candidate = { grid, solution, tapsRequired: taps, blocks: blocks || [], winds: winds || [], waters: waters || [], needsSignature: true };
             if (mechanicHas(packDef.mechanic, 'dots')) {
-              applyDotsToGrid(candidate.grid, gridSize, solution, fallbackSeed + 424242, packDef.mechanic, candidate.blocks, candidate.winds);
+              const dotCount = applyDotsToGrid(candidate.grid, gridSize, solution, fallbackSeed + 424242, packDef.mechanic, candidate.blocks, candidate.winds, candidate.waters);
+              if (dotCount === 0) {
+                continue;
+              }
               candidate.dotsApplied = true;
+            }
+            if (mechanicHas(packDef.mechanic, 'water')) {
+              if (!candidate.waters || candidate.waters.length === 0) {
+                continue;
+              }
             }
             if (mechanicHas(packDef.mechanic, 'wind')) {
               if (!candidate.winds || candidate.winds.length === 0) {
-                candidate.winds = buildWindLayout(gridSize, solution, fallbackSeed + 51515);
+                candidate.winds = buildWindLayout(gridSize, solution, fallbackSeed + 51515, candidate.blocks, elementCounts.windCount);
               }
             }
-            if (verifyPuzzleSolution(candidate.grid, gridSize, solution, packDef.mechanic, candidate.blocks, candidate.winds)) {
+            if (mechanicHas(packDef.mechanic, 'water')) {
+              if (!candidate.waters || candidate.waters.length === 0) {
+                const forbidden = (candidate.blocks || []).concat(candidate.winds || []).concat(collectDotCells(candidate.grid));
+                candidate.waters = buildWaterLayout(gridSize, solution, fallbackSeed + 52525, forbidden, candidate.blocks, elementCounts.waterCount);
+              }
+            }
+            if (verifyPuzzleSolution(candidate.grid, gridSize, solution, packDef.mechanic, candidate.blocks, candidate.winds, candidate.waters)) {
               puzzle = candidate;
               break;
             }
           }
         }
 
+        if (!puzzle) {
+          puzzle = forceGeneratePuzzle(gridSize, taps, baseSeed + 202020, packDef.mechanic);
+          puzzle.needsSignature = true;
+        }
+
         let hasDots = mechanicHas(packDef.mechanic, 'dots');
         if (hasDots && !puzzle.dotsApplied) {
-          applyDotsToGrid(puzzle.grid, gridSize, puzzle.solution, baseSeed + 424242, packDef.mechanic, puzzle.blocks || [], puzzle.winds || []);
+          const dotCount = applyDotsToGrid(puzzle.grid, gridSize, puzzle.solution, baseSeed + 424242, packDef.mechanic, puzzle.blocks || [], puzzle.winds || [], puzzle.waters || []);
+          if (dotCount === 0) {
+            puzzle = forceGeneratePuzzle(gridSize, taps, baseSeed + 303030, packDef.mechanic);
+            puzzle.needsSignature = true;
+          }
         }
         if (mechanicHas(packDef.mechanic, 'wind')) {
           if (!puzzle.winds || puzzle.winds.length === 0) {
-            puzzle.winds = buildWindLayout(gridSize, puzzle.solution, baseSeed + 51515);
+            const forbidden = (puzzle.blocks || []).concat(collectDotCells(puzzle.grid)).concat(puzzle.waters || []);
+            puzzle.winds = buildWindLayout(gridSize, puzzle.solution, baseSeed + 51515, forbidden, elementCounts.windCount);
           }
         }
-        if (!verifyPuzzleSolution(puzzle.grid, gridSize, puzzle.solution, packDef.mechanic, puzzle.blocks || [], puzzle.winds || [])) {
-          puzzle = null;
-          i -= 1;
-          continue;
+        if (mechanicHas(packDef.mechanic, 'water')) {
+          if (!puzzle.waters || puzzle.waters.length === 0) {
+            const forbidden = (puzzle.blocks || []).concat(collectDotCells(puzzle.grid)).concat(puzzle.winds || []);
+            puzzle.waters = buildWaterLayout(gridSize, puzzle.solution, baseSeed + 52525, forbidden, puzzle.blocks || [], elementCounts.waterCount);
+          }
+        }
+        puzzle = finalizePuzzleLayout(puzzle, gridSize, packDef.mechanic, baseSeed + 600000);
+        if (!verifyPuzzleSolution(puzzle.grid, gridSize, puzzle.solution, packDef.mechanic, puzzle.blocks || [], puzzle.winds || [], puzzle.waters || [])) {
+          let solved = false;
+          for (let retry = 0; retry < 3 && !solved; retry++) {
+            puzzle = forceGeneratePuzzle(gridSize, taps, baseSeed + 404040 + retry * 11111, packDef.mechanic);
+            puzzle.needsSignature = true;
+            puzzle = finalizePuzzleLayout(puzzle, gridSize, packDef.mechanic, baseSeed + 700000 + retry * 22222);
+            solved = verifyPuzzleSolution(puzzle.grid, gridSize, puzzle.solution, packDef.mechanic, puzzle.blocks || [], puzzle.winds || [], puzzle.waters || []);
+          }
         }
         if (puzzle.needsSignature) {
           const signature = canonicalPuzzleSignature(puzzle.grid);
@@ -1481,6 +2437,7 @@
           mechanic: packDef.mechanic,
           blocks: puzzle.blocks || [],
           winds: puzzle.winds || [],
+          waters: puzzle.waters || [],
         });
       }
 
@@ -1494,7 +2451,27 @@
       }));
     }
 
-    const PACKS = generateAllPacks();
+    const PACKS = PACK_DEFS.map((packDef, packIndex) => ({
+      ...packDef,
+      levels: null,
+      levelCount: PACK_LEVEL_COUNT,
+      packIndex,
+    }));
+
+    function ensurePackGenerated(packIndex) {
+      const pack = PACKS[packIndex];
+      if (!pack || pack.levels) return;
+      pack.levels = generatePackLevels(packIndex, pack);
+      if (pack.levels && pack.levels.some(level => hasElementOverlap(level.initial, level.gridSize))) {
+        pack.levels = generatePackLevels(packIndex, pack);
+      }
+    }
+
+    function getPackLevelCount(pack) {
+      if (!pack) return 0;
+      if (pack.levels) return pack.levels.length;
+      return pack.levelCount || PACK_LEVEL_COUNT;
+    }
 
     const DAILY_MECHANICS = Array.from(new Set(PACK_DEFS.map(pack => pack.mechanic)));
     const DAILY_DIFFICULTIES = [
@@ -1538,6 +2515,9 @@
       { id: 'wind_10', title: 'Wind Ten', desc: 'Complete 10 Wind levels.', check: ctx => ctx.levelsByMechanic.wind >= 10 },
       { id: 'wind_25', title: 'Wind Twenty-Five', desc: 'Complete 25 Wind levels.', check: ctx => ctx.levelsByMechanic.wind >= 25 },
       { id: 'wind_40', title: 'Wind Forty', desc: 'Complete 40 Wind levels.', check: ctx => ctx.levelsByMechanic.wind >= 40 },
+      { id: 'water_10', title: 'Water Ten', desc: 'Complete 10 Water levels.', check: ctx => ctx.levelsByMechanic.water >= 10 },
+      { id: 'water_25', title: 'Water Twenty-Five', desc: 'Complete 25 Water levels.', check: ctx => ctx.levelsByMechanic.water >= 25 },
+      { id: 'water_40', title: 'Water Forty', desc: 'Complete 40 Water levels.', check: ctx => ctx.levelsByMechanic.water >= 40 },
 
       { id: 'dots_clear_10', title: 'Ember Duster', desc: 'Extinguish 10 embers.', check: ctx => ctx.dotsCleared >= 10 },
       { id: 'dots_clear_50', title: 'Ember Sweeper', desc: 'Extinguish 50 embers.', check: ctx => ctx.dotsCleared >= 50 },
@@ -1585,11 +2565,24 @@
       achievementsUnlocked: [],
       stats: null,
       daily: null,
+      tutorialSeen: false,
+      tutorialActive: false,
+      tutorialStep: 0,
+      tutorialSequence: [],
+      tutorialRemaining: null,
+      tutorialMode: false,
+      tutorialLevel: null,
+      tutorialKind: null,
+      tutorialMechanic: null,
+      tutorialCopy: null,
+      tutorialReturn: null,
+      elementTutorialsSeen: createDefaultElementTutorialsSeen(),
       showingPackSelect: false,
       showingLevelSelect: false,
       showingDailySelect: false,
       playingDaily: false,
       showingAchievements: false,
+      showingTutorials: false,
       showingWin: false,
       winTime: 0,
       animating: false,
@@ -1610,6 +2603,8 @@
 
     // Input tracking
     let pointerStart = null;
+    let pointerDownCell = null;
+    let pointerDownTime = 0;
 
     let dailyPackCache = null;
 
@@ -1630,7 +2625,12 @@
 
       for (let i = 0; i < mechanics.length; i++) {
         const mechanic = mechanics[i];
-        const diff = DAILY_DIFFICULTIES[Math.floor(random() * DAILY_DIFFICULTIES.length)];
+        const minGrid = minGridSizeForMechanic(mechanic);
+        const minTaps = minTapsForMechanic(mechanic);
+        const dailyPool = DAILY_DIFFICULTIES.filter(diff => diff.gridSize >= minGrid && diff.taps >= minTaps);
+        const diffSource = dailyPool.length ? dailyPool : DAILY_DIFFICULTIES;
+        const diff = diffSource[Math.floor(random() * diffSource.length)];
+        const elementCounts = getElementCounts(diff.gridSize, diff.taps, mechanic);
         let puzzle = generatePuzzle(diff.gridSize, diff.taps, seed + i * 901, usedSignatures, mechanic);
 
         if (!puzzle) {
@@ -1639,42 +2639,80 @@
             const fallbackRandom = createSeededRandom(fallbackSeed);
             const solution = placementStrategies.random(fallbackRandom, diff.gridSize, diff.taps);
             const blocks = mechanicHas(mechanic, 'blocks')
-              ? buildBlockMask(diff.gridSize, fallbackSeed + 2222, Math.max(1, Math.min(diff.gridSize + 1, Math.floor(diff.gridSize * 0.7))))
+              ? buildBlockMask(diff.gridSize, fallbackSeed + 2222, elementCounts.blockCount)
               : null;
             const winds = mechanicHas(mechanic, 'wind')
-              ? buildWindLayout(diff.gridSize, solution, fallbackSeed + 3333)
+              ? buildWindLayout(diff.gridSize, solution, fallbackSeed + 3333, blocks, elementCounts.windCount)
               : null;
-            const grid = buildGridFromSolution(diff.gridSize, solution, { mechanic, blocks, windCells: winds });
-            const candidate = { grid, solution, tapsRequired: diff.taps, blocks: blocks || [], winds: winds || [], needsSignature: true };
+            const waters = mechanicHas(mechanic, 'water')
+              ? buildWaterLayout(diff.gridSize, solution, fallbackSeed + 3777, (blocks || []).concat(winds || []), blocks, elementCounts.waterCount)
+              : null;
+            const grid = buildGridFromSolution(diff.gridSize, solution, { mechanic, blocks, windCells: winds, waterCells: waters });
+            const candidate = { grid, solution, tapsRequired: diff.taps, blocks: blocks || [], winds: winds || [], waters: waters || [], needsSignature: true };
             if (mechanicHas(mechanic, 'dots')) {
-              applyDotsToGrid(candidate.grid, diff.gridSize, solution, fallbackSeed + 4444, mechanic, candidate.blocks, candidate.winds);
+              const dotCount = applyDotsToGrid(candidate.grid, diff.gridSize, solution, fallbackSeed + 4444, mechanic, candidate.blocks, candidate.winds, candidate.waters);
+              if (dotCount === 0) {
+                continue;
+              }
               candidate.dotsApplied = true;
+            }
+            if (mechanicHas(mechanic, 'water')) {
+              if (!candidate.waters || candidate.waters.length === 0) {
+                continue;
+              }
             }
             if (mechanicHas(mechanic, 'wind')) {
               if (!candidate.winds || candidate.winds.length === 0) {
-                candidate.winds = buildWindLayout(diff.gridSize, solution, fallbackSeed + 3333 + 515);
+                candidate.winds = buildWindLayout(diff.gridSize, solution, fallbackSeed + 3333 + 515, candidate.blocks, elementCounts.windCount);
               }
             }
-            if (verifyPuzzleSolution(candidate.grid, diff.gridSize, solution, mechanic, candidate.blocks, candidate.winds)) {
+            if (mechanicHas(mechanic, 'water')) {
+              if (!candidate.waters || candidate.waters.length === 0) {
+                const forbidden = (candidate.blocks || []).concat(candidate.winds || []).concat(collectDotCells(candidate.grid));
+                candidate.waters = buildWaterLayout(diff.gridSize, solution, fallbackSeed + 3777 + 515, forbidden, candidate.blocks, elementCounts.waterCount);
+              }
+            }
+            if (verifyPuzzleSolution(candidate.grid, diff.gridSize, solution, mechanic, candidate.blocks, candidate.winds, candidate.waters)) {
               puzzle = candidate;
               break;
             }
           }
         }
 
+        if (!puzzle) {
+          puzzle = forceGeneratePuzzle(diff.gridSize, diff.taps, seed + i * 90909, mechanic);
+          puzzle.needsSignature = true;
+        }
+
         let hasDots = mechanicHas(mechanic, 'dots');
         if (hasDots && !puzzle.dotsApplied) {
-          applyDotsToGrid(puzzle.grid, diff.gridSize, puzzle.solution, seed + i * 4444, mechanic, puzzle.blocks || [], puzzle.winds || []);
+          const dotCount = applyDotsToGrid(puzzle.grid, diff.gridSize, puzzle.solution, seed + i * 4444, mechanic, puzzle.blocks || [], puzzle.winds || [], puzzle.waters || []);
+          if (dotCount === 0) {
+            puzzle = forceGeneratePuzzle(diff.gridSize, diff.taps, seed + i * 91919, mechanic);
+            puzzle.needsSignature = true;
+          }
         }
         if (mechanicHas(mechanic, 'wind')) {
           if (!puzzle.winds || puzzle.winds.length === 0) {
-            puzzle.winds = buildWindLayout(diff.gridSize, puzzle.solution, seed + i * 3333 + 515);
+            const forbidden = (puzzle.blocks || []).concat(collectDotCells(puzzle.grid)).concat(puzzle.waters || []);
+            puzzle.winds = buildWindLayout(diff.gridSize, puzzle.solution, seed + i * 3333 + 515, forbidden, elementCounts.windCount);
           }
         }
-        if (!verifyPuzzleSolution(puzzle.grid, diff.gridSize, puzzle.solution, mechanic, puzzle.blocks || [], puzzle.winds || [])) {
-          puzzle = null;
-          i -= 1;
-          continue;
+        if (mechanicHas(mechanic, 'water')) {
+          if (!puzzle.waters || puzzle.waters.length === 0) {
+            const forbidden = (puzzle.blocks || []).concat(collectDotCells(puzzle.grid)).concat(puzzle.winds || []);
+            puzzle.waters = buildWaterLayout(diff.gridSize, puzzle.solution, seed + i * 3777 + 515, forbidden, puzzle.blocks || [], elementCounts.waterCount);
+          }
+        }
+        puzzle = finalizePuzzleLayout(puzzle, diff.gridSize, mechanic, seed + i * 600000);
+        if (!verifyPuzzleSolution(puzzle.grid, diff.gridSize, puzzle.solution, mechanic, puzzle.blocks || [], puzzle.winds || [], puzzle.waters || [])) {
+          let solved = false;
+          for (let retry = 0; retry < 3 && !solved; retry++) {
+            puzzle = forceGeneratePuzzle(diff.gridSize, diff.taps, seed + i * 92929 + retry * 11111, mechanic);
+            puzzle.needsSignature = true;
+            puzzle = finalizePuzzleLayout(puzzle, diff.gridSize, mechanic, seed + i * 700000 + retry * 22222);
+            solved = verifyPuzzleSolution(puzzle.grid, diff.gridSize, puzzle.solution, mechanic, puzzle.blocks || [], puzzle.winds || [], puzzle.waters || []);
+          }
         }
         if (puzzle.needsSignature) {
           const signature = canonicalPuzzleSignature(puzzle.grid);
@@ -1696,6 +2734,7 @@
           mechanic,
           blocks: puzzle.blocks || [],
           winds: puzzle.winds || [],
+          waters: puzzle.waters || [],
         });
       }
 
@@ -1714,6 +2753,9 @@
       if (!dailyPackCache || dailyPackCache.dateKey !== state.daily.dateKey) {
         dailyPackCache = generateDailyPack(state.daily.dateKey);
       }
+      if (dailyPackCache && dailyPackCache.levels && dailyPackCache.levels.some(level => hasElementOverlap(level.initial, level.gridSize))) {
+        dailyPackCache = generateDailyPack(state.daily.dateKey);
+      }
       return dailyPackCache;
     }
 
@@ -1721,10 +2763,14 @@
       if (state.playingDaily) {
         return getDailyPack();
       }
+      ensurePackGenerated(state.currentPack);
       return PACKS[state.currentPack];
     }
 
     function getCurrentLevel() {
+      if (state.tutorialMode && state.tutorialLevel) {
+        return state.tutorialLevel;
+      }
       const pack = getCurrentPack();
       return pack.levels[state.currentLevel];
     }
@@ -1739,13 +2785,25 @@
 
     function isPackCompleted(packIndex) {
       const pack = PACKS[packIndex];
-      return pack.levels.every((_, idx) => isLevelCompleted(packIndex, idx));
+      const levelCount = getPackLevelCount(pack);
+      if (levelCount === 0) return false;
+      let completed = 0;
+      for (const key of state.completedLevels) {
+        const parts = key.split(':');
+        if (parts.length !== 2) continue;
+        const idx = parseInt(parts[0], 10);
+        if (idx === packIndex) {
+          completed += 1;
+          if (completed >= levelCount) return true;
+        }
+      }
+      return false;
     }
 
     function indexToKey(globalIndex) {
       let remaining = globalIndex;
       for (let p = 0; p < PACKS.length; p++) {
-        const count = PACKS[p].levels.length;
+        const count = getPackLevelCount(PACKS[p]);
         if (remaining < count) {
           return levelKey(p, remaining);
         }
@@ -1780,6 +2838,7 @@
           echo: 0,
           blocks: 0,
           wind: 0,
+          water: 0,
         },
       };
     }
@@ -1815,6 +2874,21 @@
         ...daily,
         mechanics: daily.mechanics || {},
       };
+    }
+
+    function createDefaultElementTutorialsSeen() {
+      return {
+        dots: false,
+        blocks: false,
+        wind: false,
+        water: false,
+      };
+    }
+
+    function normalizeElementTutorialsSeen(seen) {
+      const defaults = createDefaultElementTutorialsSeen();
+      if (!seen) return defaults;
+      return { ...defaults, ...seen };
     }
 
     function formatDateKey(date) {
@@ -2051,8 +3125,13 @@
     // ============================================
 
     function loadLevel(levelIndex, packIndex = state.currentPack) {
+      ensurePackGenerated(packIndex);
       const pack = PACKS[packIndex];
-      const level = pack.levels[levelIndex];
+      let level = pack.levels[levelIndex];
+      if (level && hasElementOverlap(level.initial, level.gridSize)) {
+        pack.levels = generatePackLevels(packIndex, pack);
+        level = pack.levels[levelIndex];
+      }
       state.currentPack = packIndex;
       state.currentLevel = levelIndex;
       state.playingDaily = false;
@@ -2064,11 +3143,109 @@
       state.showingLevelSelect = false;
       state.showingDailySelect = false;
       state.showingAchievements = false;
+      state.showingTutorials = false;
       state.animating = false;
       animations = [];
       calculateLayout();
       updateAchievements();
       saveProgress();
+    }
+
+    function startTutorial() {
+      state.currentPack = 0;
+      state.currentLevel = 0;
+      const gridSize = 5;
+      const solution = [
+        { row: 1, col: 1 },
+        { row: 3, col: 3 },
+      ];
+      const grid = buildGridFromSolution(gridSize, solution, { mechanic: 'classic' });
+      state.tutorialLevel = {
+        id: 0,
+        gridSize,
+        palette: 0,
+        initial: grid,
+        solution,
+        tapsRequired: solution.length,
+        hasDots: false,
+        mechanic: 'classic',
+        blocks: [],
+        winds: [],
+        waters: [],
+      };
+      state.tutorialKind = 'core';
+      state.tutorialMechanic = null;
+      state.tutorialCopy = CORE_TUTORIAL_COPY;
+      state.tutorialReturn = { screen: 'packSelect' };
+      state.tutorialMode = true;
+      state.grid = deepCopy(state.tutorialLevel.initial);
+      state.tapsRemaining = state.tutorialLevel.tapsRequired;
+      state.history = [];
+      state.tapSequence = [];
+      state.showingWin = false;
+      state.showingPackSelect = false;
+      state.showingLevelSelect = false;
+      state.showingDailySelect = false;
+      state.showingAchievements = false;
+      state.showingTutorials = false;
+      state.playingDaily = false;
+      state.animating = false;
+      animations = [];
+      calculateLayout();
+      state.tutorialSequence = solution.slice();
+      state.tutorialStep = 0;
+      state.tutorialRemaining = new Set(state.tutorialSequence.map(tap => `${tap.row},${tap.col}`));
+      state.tutorialActive = state.tutorialSequence.length > 0;
+    }
+
+    function startElementTutorial(mechanic, options = {}) {
+      const tutorial = ELEMENT_TUTORIALS_BY_MECH[mechanic];
+      if (!tutorial) return;
+      const tutorialLevel = buildElementTutorialLevel(tutorial);
+      const packIndex = typeof options.packIndex === 'number'
+        ? options.packIndex
+        : PACKS.findIndex(pack => pack.mechanic === mechanic);
+      state.currentPack = packIndex >= 0 ? packIndex : 0;
+      state.currentLevel = 0;
+      state.tutorialLevel = {
+        id: 0,
+        gridSize: tutorial.gridSize,
+        palette: tutorial.palette,
+        initial: tutorialLevel.grid,
+        solution: tutorialLevel.solution,
+        tapsRequired: tutorialLevel.solution.length,
+        hasDots: tutorialLevel.hasDots,
+        mechanic: tutorial.mechanic,
+        blocks: tutorialLevel.blocks || [],
+        winds: tutorialLevel.winds || [],
+        waters: tutorialLevel.waters || [],
+      };
+      state.tutorialKind = 'element';
+      state.tutorialMechanic = mechanic;
+      state.tutorialCopy = tutorial.steps;
+      state.tutorialReturn = {
+        screen: options.returnScreen || 'packSelect',
+        packIndex: packIndex >= 0 ? packIndex : null,
+      };
+      state.tutorialMode = true;
+      state.grid = deepCopy(state.tutorialLevel.initial);
+      state.tapsRemaining = state.tutorialLevel.tapsRequired;
+      state.history = [];
+      state.tapSequence = [];
+      state.showingWin = false;
+      state.showingPackSelect = false;
+      state.showingLevelSelect = false;
+      state.showingDailySelect = false;
+      state.showingAchievements = false;
+      state.showingTutorials = false;
+      state.playingDaily = false;
+      state.animating = false;
+      animations = [];
+      calculateLayout();
+      state.tutorialSequence = tutorialLevel.solution.slice();
+      state.tutorialStep = 0;
+      state.tutorialRemaining = new Set(state.tutorialSequence.map(tap => `${tap.row},${tap.col}`));
+      state.tutorialActive = state.tutorialSequence.length > 0;
     }
 
     function loadDailyLevel(levelIndex) {
@@ -2084,6 +3261,7 @@
       state.showingLevelSelect = false;
       state.showingDailySelect = false;
       state.showingAchievements = false;
+      state.showingTutorials = false;
       state.animating = false;
       animations = [];
       calculateLayout();
@@ -2096,8 +3274,13 @@
       const grid = state.grid;
       for (let r = 0; r < level.gridSize; r++) {
         for (let c = 0; c < level.gridSize; c++) {
-          if (grid[r][c].parity !== 0) return false;
-          if (grid[r][c].dot === 1) return false;
+          const cell = grid[r][c];
+          if (cell.parity !== 0) return false;
+          if (cell.dot === 1) return false;
+          if (cell.block === 1) return false;
+          if (cell.wind === 1) return false;
+          if (cell.water === 1) return false;
+          if (cell.echo === 1) return false;
         }
       }
       return true;
@@ -2109,6 +3292,48 @@
     }
 
     function handleWin() {
+      if (state.tutorialMode) {
+        state.tutorialMode = false;
+        state.tutorialActive = false;
+        state.showingWin = false;
+        state.showingLevelSelect = false;
+        state.showingDailySelect = false;
+        state.playingDaily = false;
+        state.showingAchievements = false;
+        state.showingTutorials = false;
+        state.animating = false;
+        animations = [];
+        if (state.tutorialKind === 'core') {
+          state.tutorialSeen = true;
+        } else if (state.tutorialKind === 'element' && state.tutorialMechanic) {
+          state.elementTutorialsSeen[state.tutorialMechanic] = true;
+        }
+        const returnTo = state.tutorialReturn || { screen: 'packSelect' };
+        state.tutorialKind = null;
+        state.tutorialMechanic = null;
+        state.tutorialCopy = null;
+        state.tutorialReturn = null;
+        state.tutorialSequence = [];
+        state.tutorialRemaining = null;
+        state.tutorialStep = 0;
+        state.tutorialLevel = null;
+        if (returnTo.screen === 'levelSelect') {
+          if (typeof returnTo.packIndex === 'number') {
+            state.currentPack = returnTo.packIndex;
+          }
+          state.currentLevel = 0;
+          levelSelectPage = 0;
+          state.showingLevelSelect = true;
+          state.showingPackSelect = false;
+        } else if (returnTo.screen === 'tutorials') {
+          state.showingTutorials = true;
+          state.showingPackSelect = false;
+        } else {
+          state.showingPackSelect = true;
+        }
+        saveProgress();
+        return;
+      }
       state.showingWin = true;
       state.winTime = performance.now();
       const key = levelKey(state.currentPack, state.currentLevel);
@@ -2141,13 +3366,43 @@
       const hasBlocks = mechanicHas(mechanic, 'blocks');
       const hasEcho = mechanicHas(mechanic, 'echo');
       const hasWind = mechanicHas(mechanic, 'wind');
+      const hasWater = mechanicHas(mechanic, 'water');
       const hasDots = mechanicHas(mechanic, 'dots');
       const isBlocked = (r, c) => hasBlocks && state.grid[r][c].block === 1;
+      const consumeBlock = (r, c, delay = 0) => {
+        if (!hasBlocks) return;
+        if (state.grid[r][c].block === 1) {
+          state.grid[r][c].block = 0;
+          animations.push({
+            type: 'block-break',
+            row: r,
+            col: c,
+            startTime: performance.now() + Math.max(0, delay),
+            duration: 180,
+          });
+        }
+      };
       const pendingEcho = new Set();
       const isEcho = (r, c) => hasEcho && state.grid[r][c].echo === 1 && !pendingEcho.has(`${r},${c}`);
       const isWind = (r, c) => hasWind && state.grid[r][c].wind === 1;
+      const isWater = (r, c) => hasWater && state.grid[r][c].water === 1;
 
-      if (hasBlocks && isBlocked(row, col)) {
+      let tutorialAdvance = false;
+      if (state.tutorialActive) {
+        if (!state.tutorialRemaining) {
+          state.tutorialActive = false;
+        } else {
+          const key = `${row},${col}`;
+          if (!state.tutorialRemaining.has(key)) {
+            return;
+          }
+          state.tutorialRemaining.delete(key);
+          tutorialAdvance = true;
+        }
+      }
+
+      const tapBlocked = hasBlocks && isBlocked(row, col);
+      if (tapBlocked) {
         state.stats.blockedTaps += 1;
         return;
       }
@@ -2188,6 +3443,8 @@
       const triggeredEcho = new Set();
       const tapQueue = [{ row, col, startDelay: 0 }];
       let totalDuration = 0;
+      const consumedWind = new Set();
+      const consumedWater = new Set();
 
       function scheduleTapWave(tapRow, tapCol, baseDelay) {
         if (hasBlocks && isBlocked(tapRow, tapCol)) {
@@ -2216,17 +3473,42 @@
 
         const removeDots = hasDots;
 
-        const scheduleToggle = (r, c, dist, removeDot, suppressWindFlow = false, extraDelay = 0) => {
+        const scheduleToggle = (r, c, dist, removeDot, suppressWindFlow = false, suppressWaterFlow = false, extraDelay = 0) => {
           const delay = baseDelay + extraDelay + dist * waveDelay;
           maxDist = Math.max(maxDist, dist);
           waveMaxDist = Math.max(waveMaxDist, dist);
           const hadWind = hasWind && state.grid[r][c].wind === 1;
           const windDir = hadWind ? state.grid[r][c].windDir : 0;
+          const hadWater = hasWater && state.grid[r][c].water === 1;
+          const key = `${r},${c}`;
+          if (hadWind) {
+            state.grid[r][c].wind = 0;
+            state.grid[r][c].windDir = 0;
+          }
+          if (hadWater) {
+            state.grid[r][c].water = 0;
+          }
           toggleCell(r, c, delay, 'pulse', pulseDuration, removeDot);
           totalDuration = Math.max(totalDuration, delay + pulseDuration);
           maybeCollectEcho(r, c, delay);
-          if (hadWind && !suppressWindFlow) {
-            scheduleWindFlow(r, c, windDir, delay);
+          if (hadWind && !consumedWind.has(key)) {
+            consumedWind.add(key);
+            if (!suppressWindFlow) {
+              scheduleWindFlow(r, c, windDir, delay);
+            }
+          }
+          if (hadWater && !consumedWater.has(key)) {
+            consumedWater.add(key);
+            animations.push({
+              type: 'water-pulse',
+              row: r,
+              col: c,
+              startTime: performance.now() + delay,
+              duration: pulseDuration,
+            });
+            if (!suppressWaterFlow) {
+              scheduleWaterFlow(r, c, delay);
+            }
           }
         };
 
@@ -2244,20 +3526,46 @@
           let c = originCol + delta.dc;
           while (r >= 0 && r < gridSize && c >= 0 && c < gridSize) {
             if (hasBlocks && isBlocked(r, c)) {
+              const hitDelay = baseDelay + extraDelay + Math.max(step, 1) * waveDelay;
+              consumeBlock(r, c, hitDelay);
               break;
             }
-            scheduleToggle(r, c, Math.max(step, 1), removeDots, false, extraDelay);
+            scheduleToggle(r, c, Math.max(step, 1), removeDots, false, false, extraDelay);
             r += delta.dr;
             c += delta.dc;
             step += 1;
           }
         };
 
+        const scheduleWaterFlow = (originRow, originCol, startDelay) => {
+          const extraDelay = Math.max(0, startDelay - baseDelay);
+          for (let dr = -1; dr <= 1; dr++) {
+            for (let dc = -1; dc <= 1; dc++) {
+              if (dr === 0 && dc === 0) continue;
+              const r = originRow + dr;
+              const c = originCol + dc;
+              if (r < 0 || r >= gridSize || c < 0 || c >= gridSize) continue;
+              if (hasBlocks && isBlocked(r, c)) {
+                const hitDelay = baseDelay + extraDelay + waveDelay;
+                consumeBlock(r, c, hitDelay);
+                continue;
+              }
+              scheduleToggle(r, c, 1, removeDots, false, false, extraDelay);
+            }
+          }
+        };
+
         if (hasWind && isWind(tapRow, tapCol)) {
           const dir = state.grid[tapRow][tapCol].windDir;
-          scheduleToggle(tapRow, tapCol, 0, removeDots, true);
+          scheduleToggle(tapRow, tapCol, 0, removeDots, true, true);
           scheduleWindFlow(tapRow, tapCol, dir, baseDelay);
 
+          return;
+        }
+
+        if (hasWater && isWater(tapRow, tapCol)) {
+          scheduleToggle(tapRow, tapCol, 0, removeDots, false, true);
+          scheduleWaterFlow(tapRow, tapCol, baseDelay);
           return;
         }
 
@@ -2265,12 +3573,16 @@
 
         for (let c = tapCol - 1; c >= 0; c--) {
           if (hasBlocks && isBlocked(tapRow, c)) {
+            const hitDelay = baseDelay + Math.abs(c - tapCol) * waveDelay;
+            consumeBlock(tapRow, c, hitDelay);
             break;
           }
           scheduleToggle(tapRow, c, Math.abs(c - tapCol), removeDots);
         }
         for (let c = tapCol + 1; c < gridSize; c++) {
           if (hasBlocks && isBlocked(tapRow, c)) {
+            const hitDelay = baseDelay + Math.abs(c - tapCol) * waveDelay;
+            consumeBlock(tapRow, c, hitDelay);
             break;
           }
           scheduleToggle(tapRow, c, Math.abs(c - tapCol), removeDots);
@@ -2278,12 +3590,16 @@
 
         for (let r = tapRow - 1; r >= 0; r--) {
           if (hasBlocks && isBlocked(r, tapCol)) {
+            const hitDelay = baseDelay + Math.abs(r - tapRow) * waveDelay;
+            consumeBlock(r, tapCol, hitDelay);
             break;
           }
           scheduleToggle(r, tapCol, Math.abs(r - tapRow), removeDots);
         }
         for (let r = tapRow + 1; r < gridSize; r++) {
           if (hasBlocks && isBlocked(r, tapCol)) {
+            const hitDelay = baseDelay + Math.abs(r - tapRow) * waveDelay;
+            consumeBlock(r, tapCol, hitDelay);
             break;
           }
           scheduleToggle(r, tapCol, Math.abs(r - tapRow), removeDots);
@@ -2322,6 +3638,18 @@
         }
       }, totalDuration + 50);
 
+      if (tutorialAdvance) {
+        state.tutorialStep += 1;
+        if (!state.tutorialRemaining || state.tutorialRemaining.size === 0) {
+          state.tutorialActive = false;
+          if (state.tutorialKind === 'core') {
+            state.tutorialSeen = true;
+          } else if (state.tutorialKind === 'element' && state.tutorialMechanic) {
+            state.elementTutorialsSeen[state.tutorialMechanic] = true;
+          }
+        }
+      }
+
       saveProgress();
     }
 
@@ -2355,6 +3683,16 @@
           if (current.wind === 1) {
             current.wind = 0;
             current.windDir = 0;
+          }
+        }, removeDelay);
+      }
+      if (cell.water === 1) {
+        const removeDelay = Math.max(0, delay);
+        setTimeout(() => {
+          const current = state.grid?.[row]?.[col];
+          if (!current || current !== cell) return;
+          if (current.water === 1) {
+            current.water = 0;
           }
         }, removeDelay);
       }
@@ -2454,7 +3792,9 @@
         achievementsUnlocked: state.achievementsUnlocked,
         stats: state.stats,
         daily: state.daily,
-        saveVersion: 4,
+        tutorialSeen: state.tutorialSeen,
+        elementTutorialsSeen: state.elementTutorialsSeen,
+        saveVersion: 5,
       };
       try {
         localStorage.setItem('parity_save_v3', JSON.stringify(saveData));
@@ -2486,6 +3826,19 @@
           state.achievementsUnlocked = data.achievementsUnlocked || [];
           state.stats = normalizeStats(data.stats);
           state.daily = normalizeDaily(data.daily);
+          state.tutorialSeen = !!data.tutorialSeen;
+          state.elementTutorialsSeen = normalizeElementTutorialsSeen(data.elementTutorialsSeen);
+          state.tutorialActive = false;
+          state.tutorialStep = 0;
+          state.tutorialSequence = [];
+          state.tutorialRemaining = null;
+          state.tutorialMode = false;
+          state.tutorialLevel = null;
+          state.tutorialKind = null;
+          state.tutorialMechanic = null;
+          state.tutorialCopy = null;
+          state.tutorialReturn = null;
+          state.showingTutorials = false;
           if (!data.stats && state.completedLevels.length > 0) {
             state.stats = rebuildStatsFromProgress();
           }
@@ -2500,6 +3853,19 @@
       state.achievementsUnlocked = [];
       state.stats = createDefaultStats();
       state.daily = createDefaultDaily();
+      state.tutorialSeen = false;
+      state.elementTutorialsSeen = createDefaultElementTutorialsSeen();
+      state.tutorialActive = false;
+      state.tutorialStep = 0;
+      state.tutorialSequence = [];
+      state.tutorialRemaining = null;
+      state.tutorialMode = false;
+      state.tutorialLevel = null;
+      state.tutorialKind = null;
+      state.tutorialMechanic = null;
+      state.tutorialCopy = null;
+      state.tutorialReturn = null;
+      state.showingTutorials = false;
       ensureDailyState();
       updateAchievements();
       return false;
@@ -2608,6 +3974,10 @@
       return { x: w - 132, y: 20, w: 112, h: 24 };
     }
 
+    function getTutorialsButtonRect() {
+      return { x: 20, y: 20, w: 92, h: 24 };
+    }
+
     function getAchievementsBackRect() {
       return { x: 20, y: 20, w: 68, h: 24 };
     }
@@ -2615,6 +3985,16 @@
     function handlePointerDown(e) {
       e.preventDefault();
       pointerStart = getPointerPos(e);
+      pointerDownCell = null;
+      pointerDownTime = 0;
+      if (state.transitioning || state.showingPackSelect || state.showingLevelSelect || state.showingDailySelect || state.showingAchievements || state.showingTutorials) {
+        return;
+      }
+      const cell = screenToGrid(pointerStart.x, pointerStart.y);
+      if (cell) {
+        pointerDownCell = cell;
+        pointerDownTime = performance.now();
+      }
     }
 
     function handlePointerUp(e) {
@@ -2630,10 +4010,26 @@
       const dy = pos.y - pointerStart.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
 
+      if (pointerDownCell) {
+        const endCell = screenToGrid(pos.x, pos.y);
+        const sameCell = endCell && endCell.row === pointerDownCell.row && endCell.col === pointerDownCell.col;
+        if (!sameCell) {
+          animations.push({
+            type: 'press-out',
+            row: pointerDownCell.row,
+            col: pointerDownCell.col,
+            startTime: performance.now(),
+            duration: 160,
+          });
+        }
+        pointerDownCell = null;
+      }
+
       // Swipe for level select paging
       if (state.showingLevelSelect && !state.transitioning && dist >= 10) {
         const swipeThreshold = 40;
         if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > swipeThreshold) {
+          ensurePackGenerated(state.currentPack);
           const totalPages = Math.ceil(getCurrentPack().levels.length / levelsPerPage);
           if (dx < 0 && levelSelectPage < totalPages - 1) {
             levelSelectPage++;
@@ -2670,6 +4066,17 @@
 
     function handleClick(x, y) {
       if (state.transitioning) return;
+      if (state.tutorialActive) {
+        const cell = screenToGrid(x, y);
+        if (cell) {
+          const cellX = layout.gridX + cell.col * layout.cellSize;
+          const cellY = layout.gridY + cell.row * layout.cellSize;
+          const tapX = (x - cellX) / layout.cellSize;
+          const tapY = (y - cellY) / layout.cellSize;
+          handleTap(cell.row, cell.col, tapX, tapY);
+        }
+        return;
+      }
       if (state.showingPackSelect) {
         const dailyRect = getDailyCardRect();
         if (x >= dailyRect.x && x <= dailyRect.x + dailyRect.w && y >= dailyRect.y && y <= dailyRect.y + dailyRect.h) {
@@ -2677,6 +4084,15 @@
           state.transitioning = true;
           state.transition = {
             kind: 'toDailySelect',
+            startTime: performance.now(),
+          };
+          return;
+        }
+        const tutorialsBtn = getTutorialsButtonRect();
+        if (x >= tutorialsBtn.x && x <= tutorialsBtn.x + tutorialsBtn.w && y >= tutorialsBtn.y && y <= tutorialsBtn.y + tutorialsBtn.h) {
+          state.transitioning = true;
+          state.transition = {
+            kind: 'toTutorials',
             startTime: performance.now(),
           };
           return;
@@ -2693,15 +4109,40 @@
         }
         const selectedPack = getPackSelectHit(x, y);
         if (selectedPack !== null) {
-          state.currentPack = selectedPack;
-          state.currentLevel = 0;
-          levelSelectPage = 0;
+          const pack = PACKS[selectedPack];
+          const tutorial = ELEMENT_TUTORIALS_BY_MECH[pack.mechanic];
+          if (tutorial && !state.elementTutorialsSeen[pack.mechanic]) {
+            startElementTutorial(pack.mechanic, { returnScreen: 'levelSelect', packIndex: selectedPack });
+          } else {
+            state.currentPack = selectedPack;
+            state.currentLevel = 0;
+            levelSelectPage = 0;
+            state.transitioning = true;
+            state.transition = {
+              kind: 'toPackLevels',
+              startTime: performance.now(),
+              packIndex: selectedPack,
+            };
+          }
+        }
+        return;
+      }
+      if (state.showingTutorials) {
+        const backBtn = getPackButtonRect();
+        if (x >= backBtn.x && x <= backBtn.x + backBtn.w && y >= backBtn.y && y <= backBtn.y + backBtn.h) {
           state.transitioning = true;
           state.transition = {
-            kind: 'toPackLevels',
+            kind: 'toPackSelectFromTutorials',
             startTime: performance.now(),
-            packIndex: selectedPack,
           };
+          return;
+        }
+        const selected = getTutorialsHit(x, y);
+        if (selected !== null) {
+          const tutorial = ELEMENT_TUTORIALS[selected];
+          if (tutorial) {
+            startElementTutorial(tutorial.mechanic, { returnScreen: 'tutorials' });
+          }
         }
         return;
       }
@@ -2777,6 +4218,7 @@
 
       // Check for level select screen
       if (state.showingLevelSelect) {
+        ensurePackGenerated(state.currentPack);
         const packBtn = getPackButtonRect();
         if (x >= packBtn.x && x <= packBtn.x + packBtn.w && y >= packBtn.y && y <= packBtn.y + packBtn.h) {
           state.transitioning = true;
@@ -2865,6 +4307,7 @@
       const startX = (w - gridW) / 2;
       const startY = (h - gridH) / 2 + 20;
 
+      ensurePackGenerated(state.currentPack);
       const totalPages = Math.ceil(getCurrentPack().levels.length / levelsPerPage);
 
       // Check left arrow
@@ -2900,11 +4343,12 @@
       const now = performance.now();
       const w = window.innerWidth;
       const h = window.innerHeight;
-      const level = getCurrentLevel();
-      const palette = PALETTES[level.palette];
+      const showMenu = state.showingPackSelect || state.showingDailySelect || state.showingAchievements || state.showingLevelSelect || state.showingTutorials;
+      const gameplayLevel = showMenu && !state.transitioning ? null : getCurrentLevel();
+      const baseBg = gameplayLevel ? PALETTES[gameplayLevel.palette].bg : '#e7ebf0';
 
-      // Clear with background color (target color = tileA)
-      ctx.fillStyle = palette.bg;
+      // Clear background
+      ctx.fillStyle = baseBg;
       ctx.fillRect(0, 0, w, h);
 
       if (state.transitioning && state.transition) {
@@ -3053,6 +4497,16 @@
             state.showingPackSelect = false;
             state.showingAchievements = true;
           }
+        } else if (state.transition.kind === 'toTutorials') {
+          const t = easeInOut((now - state.transition.startTime) / outDuration);
+          renderPackSelect(1 - t);
+          renderTutorials(t);
+          if (t >= 1) {
+            state.transitioning = false;
+            state.transition = null;
+            state.showingPackSelect = false;
+            state.showingTutorials = true;
+          }
         } else if (state.transition.kind === 'toPackSelectFromAchievements') {
           const t = easeInOut((now - state.transition.startTime) / outDuration);
           renderAchievements(1 - t);
@@ -3063,6 +4517,16 @@
             state.showingPackSelect = true;
             state.showingAchievements = false;
           }
+        } else if (state.transition.kind === 'toPackSelectFromTutorials') {
+          const t = easeInOut((now - state.transition.startTime) / outDuration);
+          renderTutorials(1 - t);
+          renderPackSelect(t);
+          if (t >= 1) {
+            state.transitioning = false;
+            state.transition = null;
+            state.showingPackSelect = true;
+            state.showingTutorials = false;
+          }
         }
       } else if (state.showingPackSelect) {
         renderPackSelect();
@@ -3070,6 +4534,8 @@
         renderDailySelect();
       } else if (state.showingAchievements) {
         renderAchievements();
+      } else if (state.showingTutorials) {
+        renderTutorials();
       } else if (state.showingLevelSelect) {
         renderLevelSelect();
       } else {
@@ -3087,6 +4553,8 @@
 
       // Clean up finished animations
       animations = animations.filter(a => now < a.startTime + a.duration);
+
+      renderTutorialOverlay(now);
 
       requestAnimationFrame(render);
     }
@@ -3157,6 +4625,13 @@
           let echoHitAnim = null;
           let echoFireAnim = null;
           let dotAnim = null;
+          let waterPulseAnim = null;
+          let blockBreakAnim = null;
+          let pressAmount = 0;
+          if (pointerDownCell && pointerDownCell.row === r && pointerDownCell.col === c) {
+            const t = Math.min(1, Math.max(0, (now - pointerDownTime) / 120));
+            pressAmount = Math.max(pressAmount, t);
+          }
 
           for (const anim of animations) {
             if (anim.row === r && anim.col === c) {
@@ -3171,6 +4646,14 @@
                 echoFireAnim = { elapsed, anim };
               } else if (anim.type === 'dot' && elapsed >= 0) {
                 dotAnim = { elapsed, anim };
+              } else if (anim.type === 'water-pulse' && elapsed >= 0 && elapsed < anim.duration) {
+                waterPulseAnim = { elapsed, anim };
+              } else if (anim.type === 'block-break' && elapsed < anim.duration) {
+                blockBreakAnim = { elapsed, anim };
+              } else if (anim.type === 'press-out' && elapsed >= 0 && elapsed < anim.duration) {
+                const t = Math.min(1, elapsed / anim.duration);
+                const amount = 1 - t;
+                pressAmount = Math.max(pressAmount, amount);
               }
             }
           }
@@ -3202,7 +4685,8 @@
 
             // Fluffy pulse: 1.0 → 0.85 → 1.0
             const pulseAmount = Math.sin(t * Math.PI);
-            const scale = 1 - 0.15 * pulseAmount;
+            const pressScale = 1 - pressAmount * 0.06;
+            const scale = (1 - 0.15 * pulseAmount) * pressScale;
 
             // Rounding during animation
             const animRadius = baseSize * 0.2 * pulseAmount;
@@ -3228,7 +4712,15 @@
           } else {
             // No animation - draw simple rectangle
             ctx.fillStyle = displayParity === 0 ? palette.tileA : palette.tileB;
-            ctx.fillRect(Math.floor(x), Math.floor(y), Math.ceil(baseSize), Math.ceil(baseSize));
+            if (pressAmount > 0) {
+              const pressScale = 1 - pressAmount * 0.06;
+              const scaledSize = baseSize * pressScale;
+              const offsetX = (baseSize - scaledSize) / 2;
+              const offsetY = (baseSize - scaledSize) / 2;
+              ctx.fillRect(Math.floor(x + offsetX), Math.floor(y + offsetY), Math.ceil(scaledSize), Math.ceil(scaledSize));
+            } else {
+              ctx.fillRect(Math.floor(x), Math.floor(y), Math.ceil(baseSize), Math.ceil(baseSize));
+            }
           }
 
           if (cell.dot === 1) {
@@ -3254,11 +4746,43 @@
             }
           }
 
-          if (cell.block === 1) {
-            const blockSize = Math.max(6, baseSize * 0.22);
-            ctx.strokeStyle = hexToRgba(palette.tileB, 0.7);
-            ctx.lineWidth = Math.max(1.5, baseSize * 0.04);
+          if (cell.block === 1 || blockBreakAnim) {
+            const baseBlockSize = Math.max(6, baseSize * 0.22);
+            let blockAlpha = 0.7;
+            let blockScale = 1;
+            if (blockBreakAnim) {
+              const t = Math.max(0, Math.min(1, blockBreakAnim.elapsed / blockBreakAnim.anim.duration));
+              blockAlpha = 0.7 * (1 - t);
+              blockScale = 1 - 0.25 * t;
+            }
+            const blockSize = baseBlockSize * blockScale;
+            ctx.strokeStyle = hexToRgba(palette.tileB, blockAlpha);
+            ctx.lineWidth = Math.max(1.5, baseSize * 0.04) * blockScale;
             ctx.strokeRect(centerX - blockSize / 2, centerY - blockSize / 2, blockSize, blockSize);
+          }
+
+          if (cell.water === 1) {
+            let hexSize = Math.max(8, baseSize * 0.24);
+            const waterColor = displayParity === 0 ? palette.tileB : palette.tileA;
+            let waterAlpha = 0.75;
+            if (waterPulseAnim) {
+              const t = Math.min(1, waterPulseAnim.elapsed / waterPulseAnim.anim.duration);
+              const pulse = Math.sin(t * Math.PI);
+              const scale = 1 - 0.15 * pulse;
+              hexSize *= scale;
+              waterAlpha = 0.75 + 0.15 * pulse;
+            }
+            ctx.beginPath();
+            for (let i = 0; i < 6; i++) {
+              const angle = Math.PI / 6 + i * (Math.PI / 3);
+              const x = centerX + Math.cos(angle) * hexSize * 0.55;
+              const y = centerY + Math.sin(angle) * hexSize * 0.55;
+              if (i === 0) ctx.moveTo(x, y);
+              else ctx.lineTo(x, y);
+            }
+            ctx.closePath();
+            ctx.fillStyle = hexToRgba(waterColor, waterAlpha);
+            ctx.fill();
           }
 
           if (cell.wind === 1) {
@@ -3311,19 +4835,19 @@
             drawRoundedRectStroke(x + inset, y + inset, baseSize - inset * 2, baseSize - inset * 2, [radius, radius, radius, radius]);
           }
 
-          if (hintAnim) {
-            const t = hintAnim.elapsed / hintAnim.anim.duration;
-            const pulses = hintAnim.anim.pulses || 2;
-            const wave = Math.sin(t * Math.PI * 2 * pulses);
-            const intensity = Math.max(0, wave);
-            const inset = baseSize * 0.08;
-            const radius = baseSize * 0.18;
-            ctx.fillStyle = hexToRgba(palette.dot, 0.08 + intensity * 0.18);
-            drawRoundedRectFill(x + inset, y + inset, baseSize - inset * 2, baseSize - inset * 2, [radius, radius, radius, radius]);
-            ctx.strokeStyle = hexToRgba(palette.dot, 0.2 + intensity * 0.7);
-            ctx.lineWidth = Math.max(2, baseSize * 0.06);
-            drawRoundedRectStroke(x + inset, y + inset, baseSize - inset * 2, baseSize - inset * 2, [radius, radius, radius, radius]);
-          }
+      if (hintAnim) {
+        const t = hintAnim.elapsed / hintAnim.anim.duration;
+        const pulses = hintAnim.anim.pulses || 2;
+        const wave = Math.sin(t * Math.PI * 2 * pulses);
+        const intensity = Math.max(0, wave);
+        const inset = baseSize * 0.08;
+        const radius = baseSize * 0.18;
+        ctx.fillStyle = hexToRgba(palette.dot, 0.08 + intensity * 0.18);
+        drawRoundedRectFill(x + inset, y + inset, baseSize - inset * 2, baseSize - inset * 2, [radius, radius, radius, radius]);
+        ctx.strokeStyle = hexToRgba(palette.dot, 0.2 + intensity * 0.7);
+        ctx.lineWidth = Math.max(2, baseSize * 0.06);
+        drawRoundedRectStroke(x + inset, y + inset, baseSize - inset * 2, baseSize - inset * 2, [radius, radius, radius, radius]);
+      }
         }
       }
     }
@@ -3442,17 +4966,21 @@
     function getPackSelectLayout() {
       const w = window.innerWidth;
       const h = window.innerHeight;
-      const cols = 2;
-      const rows = Math.ceil(PACKS.length / cols);
-      const cellW = Math.min(w * 0.42, 220);
-      const cellH = Math.min(h * 0.16, 100);
-      const gridW = cols * cellW + (cols - 1) * 16;
-      const gridH = rows * cellH + (rows - 1) * 16;
-      const startX = (w - gridW) / 2;
       const dailyRect = getDailyCardRect();
       const startY = dailyRect.y + dailyRect.h + 30;
+      const gap = Math.min(16, Math.max(10, h * 0.015));
+      const cols = w >= 720 ? 3 : 2;
+      const rows = Math.ceil(PACKS.length / cols);
+      const maxGridW = w * 0.9;
+      const cellW = Math.min(220, (maxGridW - gap * (cols - 1)) / cols);
+      const baseCellH = Math.min(h * 0.16, 100);
+      const availableH = Math.max(140, h - startY - 24);
+      const maxCellH = (availableH - gap * (rows - 1)) / rows;
+      const cellH = Math.max(60, Math.min(baseCellH, maxCellH));
+      const gridW = cols * cellW + (cols - 1) * gap;
+      const startX = (w - gridW) / 2;
 
-      return { cols, rows, cellW, cellH, startX, startY };
+      return { cols, rows, cellW, cellH, startX, startY, gap };
     }
 
     function getPackSelectHit(x, y) {
@@ -3460,8 +4988,40 @@
       for (let i = 0; i < PACKS.length; i++) {
         const row = Math.floor(i / layout.cols);
         const col = i % layout.cols;
-        const rx = layout.startX + col * (layout.cellW + 16);
-        const ry = layout.startY + row * (layout.cellH + 16);
+        const rx = layout.startX + col * (layout.cellW + layout.gap);
+        const ry = layout.startY + row * (layout.cellH + layout.gap);
+        if (x >= rx && x <= rx + layout.cellW && y >= ry && y <= ry + layout.cellH) {
+          return i;
+        }
+      }
+      return null;
+    }
+
+    function getTutorialsLayout() {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      const cols = w >= 720 ? 2 : 1;
+      const rows = Math.ceil(ELEMENT_TUTORIALS.length / cols);
+      const gap = Math.min(18, Math.max(12, h * 0.02));
+      const maxGridW = w * 0.86;
+      const cellW = Math.min(320, (maxGridW - gap * (cols - 1)) / cols);
+      const headerSpace = 140;
+      const availableH = Math.max(160, h - headerSpace - 24);
+      const cellH = Math.max(84, Math.min(120, (availableH - gap * (rows - 1)) / rows));
+      const gridW = cols * cellW + (cols - 1) * gap;
+      const gridH = rows * cellH + (rows - 1) * gap;
+      const startX = (w - gridW) / 2;
+      const startY = headerSpace + (availableH - gridH) / 2;
+      return { cols, rows, cellW, cellH, startX, startY, gap };
+    }
+
+    function getTutorialsHit(x, y) {
+      const layout = getTutorialsLayout();
+      for (let i = 0; i < ELEMENT_TUTORIALS.length; i++) {
+        const row = Math.floor(i / layout.cols);
+        const col = i % layout.cols;
+        const rx = layout.startX + col * (layout.cellW + layout.gap);
+        const ry = layout.startY + row * (layout.cellH + layout.gap);
         if (x >= rx && x <= rx + layout.cellW && y >= ry && y <= ry + layout.cellH) {
           return i;
         }
@@ -3536,13 +5096,25 @@
       ctx.textBaseline = 'middle';
       ctx.fillText('Achievements', achBtn.x + achBtn.w / 2, achBtn.y + achBtn.h / 2 + 0.5);
 
+      const tutorialsBtn = getTutorialsButtonRect();
+      ctx.fillStyle = '#d1d5db';
+      fillRoundedRect(tutorialsBtn.x, tutorialsBtn.y, tutorialsBtn.w, tutorialsBtn.h, 10);
+      ctx.strokeStyle = '#9ca3af';
+      ctx.lineWidth = 1;
+      strokeRoundedRect(tutorialsBtn.x, tutorialsBtn.y, tutorialsBtn.w, tutorialsBtn.h, 10);
+      ctx.fillStyle = '#374151';
+      ctx.font = '12px -apple-system, BlinkMacSystemFont, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('Tutorials', tutorialsBtn.x + tutorialsBtn.w / 2, tutorialsBtn.y + tutorialsBtn.h / 2 + 0.5);
+
       const layout = getPackSelectLayout();
       for (let i = 0; i < PACKS.length; i++) {
         const pack = PACKS[i];
         const row = Math.floor(i / layout.cols);
         const col = i % layout.cols;
-        const x = layout.startX + col * (layout.cellW + 16);
-        const y = layout.startY + row * (layout.cellH + 16);
+        const x = layout.startX + col * (layout.cellW + layout.gap);
+        const y = layout.startY + row * (layout.cellH + layout.gap);
         const palette = PALETTES[pack.palette];
         const completed = isPackCompleted(i);
 
@@ -3564,7 +5136,7 @@
 
         ctx.fillStyle = hexToRgba(getReadableTextColor(completed ? palette.tileA : palette.tileB), 0.6);
         ctx.font = '11px -apple-system, BlinkMacSystemFont, sans-serif';
-        ctx.fillText(`${pack.levels.length} levels`, x + 14, y + layout.cellH - 20);
+        ctx.fillText(`${getPackLevelCount(pack)} levels`, x + 14, y + layout.cellH - 20);
 
         if (completed) {
           ctx.strokeStyle = hexToRgba(getReadableTextColor(palette.tileA), 0.6);
@@ -3591,6 +5163,7 @@
       const startX = (w - gridW) / 2;
       const startY = (h - gridH) / 2 + 20;
 
+      ensurePackGenerated(state.currentPack);
       const pack = getCurrentPack();
       const totalPages = Math.max(1, Math.ceil(pack.levels.length / levelsPerPage));
       levelSelectPage = Math.max(0, Math.min(levelSelectPage, totalPages - 1));
@@ -3859,6 +5432,89 @@
       ctx.restore();
     }
 
+    function renderTutorials(alpha = 1) {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      ctx.save();
+      ctx.globalAlpha *= alpha;
+
+      ctx.fillStyle = '#e7ebf0';
+      ctx.fillRect(0, 0, w, h);
+
+      const backBtn = getPackButtonRect();
+      ctx.fillStyle = '#d1d5db';
+      fillRoundedRect(backBtn.x, backBtn.y, backBtn.w, backBtn.h, 10);
+      ctx.strokeStyle = '#9ca3af';
+      ctx.lineWidth = 1;
+      strokeRoundedRect(backBtn.x, backBtn.y, backBtn.w, backBtn.h, 10);
+      ctx.fillStyle = '#374151';
+      ctx.font = '12px -apple-system, BlinkMacSystemFont, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('Packs', backBtn.x + backBtn.w / 2, backBtn.y + backBtn.h / 2 + 0.5);
+
+      ctx.fillStyle = '#4b5563';
+      ctx.font = 'bold 20px -apple-system, BlinkMacSystemFont, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('Tutorials', w / 2, 40);
+
+      ctx.fillStyle = '#6b7280';
+      ctx.font = '13px -apple-system, BlinkMacSystemFont, sans-serif';
+      ctx.fillText('The bigger the tile, the better it is for the player.', w / 2, 66);
+      ctx.fillText('Tap a card to replay a two-step mechanic intro.', w / 2, 86);
+
+      const layout = getTutorialsLayout();
+      for (let i = 0; i < ELEMENT_TUTORIALS.length; i++) {
+        const tutorial = ELEMENT_TUTORIALS[i];
+        const row = Math.floor(i / layout.cols);
+        const col = i % layout.cols;
+        const x = layout.startX + col * (layout.cellW + layout.gap);
+        const y = layout.startY + row * (layout.cellH + layout.gap);
+        const palette = PALETTES[tutorial.palette];
+        const completed = !!state.elementTutorialsSeen[tutorial.mechanic];
+
+        const fill = completed ? palette.tileA : palette.tileB;
+        ctx.fillStyle = fill;
+        fillRoundedRect(x, y, layout.cellW, layout.cellH, 14);
+        ctx.strokeStyle = hexToRgba(completed ? palette.tileB : palette.tileA, 0.6);
+        ctx.lineWidth = 2;
+        strokeRoundedRect(x, y, layout.cellW, layout.cellH, 14);
+
+        const textColor = getReadableTextColor(fill);
+        ctx.fillStyle = textColor;
+        ctx.font = 'bold 16px -apple-system, BlinkMacSystemFont, sans-serif';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+        ctx.fillText(tutorial.title, x + 14, y + 12);
+
+        ctx.fillStyle = hexToRgba(textColor, 0.7);
+        ctx.font = '12px -apple-system, BlinkMacSystemFont, sans-serif';
+        ctx.fillText(tutorial.subtitle, x + 14, y + 34);
+
+        ctx.fillStyle = hexToRgba(textColor, 0.55);
+        ctx.font = '11px -apple-system, BlinkMacSystemFont, sans-serif';
+        ctx.fillText(tutorial.detail, x + 14, y + 52);
+
+        ctx.fillStyle = hexToRgba(textColor, 0.55);
+        ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
+        ctx.textAlign = 'right';
+        ctx.fillText('2 steps', x + layout.cellW - 12, y + layout.cellH - 18);
+
+        if (completed) {
+          ctx.strokeStyle = hexToRgba(getReadableTextColor(palette.tileA), 0.6);
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(x + layout.cellW - 34, y + layout.cellH - 26);
+          ctx.lineTo(x + layout.cellW - 26, y + layout.cellH - 18);
+          ctx.lineTo(x + layout.cellW - 14, y + layout.cellH - 30);
+          ctx.stroke();
+        }
+      }
+
+      ctx.restore();
+    }
+
     function renderAchievements(alpha = 1) {
       const w = window.innerWidth;
       const h = window.innerHeight;
@@ -4013,6 +5669,76 @@
       }
     }
 
+    function renderTutorialOverlay(now) {
+      if (!state.tutorialActive) return;
+      const level = getCurrentLevel();
+      const palette = level ? PALETTES[level.palette] : PALETTES[0];
+      let target = null;
+      if (state.tutorialRemaining && state.tutorialRemaining.size > 0) {
+        for (const cell of state.tutorialSequence) {
+          const key = `${cell.row},${cell.col}`;
+          if (state.tutorialRemaining.has(key)) {
+            target = cell;
+            break;
+          }
+        }
+      }
+      if (!target) return;
+      const cellX = layout.gridX + target.col * layout.cellSize;
+      const cellY = layout.gridY + target.row * layout.cellSize;
+      const size = layout.cellSize;
+      const t = now ? (now / 900) % 1 : 0;
+      const pulse = Math.sin(t * Math.PI * 2) * 0.5 + 0.5;
+      const inset = size * (0.04 + 0.03 * pulse);
+      const radius = size * 0.22;
+      const highlight = palette.dot || palette.tileB;
+      ctx.save();
+      ctx.shadowColor = hexToRgba(highlight, 0.65);
+      ctx.shadowBlur = Math.max(8, size * 0.25);
+      ctx.fillStyle = hexToRgba(highlight, 0.28);
+      fillRoundedRect(cellX + inset, cellY + inset, size - inset * 2, size - inset * 2, radius);
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = hexToRgba(highlight, 0.95);
+      ctx.lineWidth = Math.max(4, size * 0.1);
+      strokeRoundedRect(cellX + inset, cellY + inset, size - inset * 2, size - inset * 2, radius);
+
+      const total = state.tutorialSequence.length;
+      const remaining = state.tutorialRemaining ? state.tutorialRemaining.size : total;
+      const step = Math.max(1, total - remaining + 1);
+      const tutorialCopy = state.tutorialCopy || CORE_TUTORIAL_COPY;
+      const copyIndex = Math.max(0, Math.min(tutorialCopy.length - 1, step - 1));
+      const textLines = tutorialCopy[copyIndex] || CORE_TUTORIAL_COPY[0];
+      const bubbleRadius = Math.max(44, size * 0.45);
+      let bubbleX = cellX + size / 2;
+      let bubbleY = cellY + size + bubbleRadius + 10;
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      if (bubbleY + bubbleRadius > h - 10) {
+        bubbleY = cellY - bubbleRadius - 10;
+      }
+      if (bubbleX - bubbleRadius < 10) bubbleX = bubbleRadius + 10;
+      if (bubbleX + bubbleRadius > w - 10) bubbleX = w - bubbleRadius - 10;
+
+      const bubbleW = bubbleRadius * 3.6;
+      const bubbleH = bubbleRadius * 2.1;
+      const bubbleX0 = bubbleX - bubbleW / 2;
+      const bubbleY0 = bubbleY - bubbleH / 2;
+      ctx.fillStyle = hexToRgba(highlight, 0.95);
+      fillRoundedRect(bubbleX0, bubbleY0, bubbleW, bubbleH, bubbleH / 2);
+      ctx.strokeStyle = hexToRgba(highlight, 1);
+      ctx.lineWidth = 2.5;
+      strokeRoundedRect(bubbleX0, bubbleY0, bubbleW, bubbleH, bubbleH / 2);
+
+      ctx.fillStyle = '#f8fafc';
+      ctx.font = '14px -apple-system, BlinkMacSystemFont, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const lineGap = 14;
+      ctx.fillText(textLines[0], bubbleX, bubbleY - lineGap * 0.5);
+      ctx.fillText(textLines[1], bubbleX, bubbleY + lineGap * 0.5);
+      ctx.restore();
+    }
+
     // ============================================
     // INITIALIZATION
     // ============================================
@@ -4028,11 +5754,21 @@
       if (!state.daily) state.daily = createDefaultDaily();
       ensureDailyState();
       updateAchievements();
-      loadLevel(0, 0);
-      state.showingPackSelect = true;
-      state.showingLevelSelect = false;
-      state.showingDailySelect = false;
-      state.playingDaily = false;
+      state.currentPack = 0;
+      state.currentLevel = 0;
+      if (!state.tutorialSeen) {
+        startTutorial();
+        state.showingPackSelect = false;
+        state.showingLevelSelect = false;
+        state.showingDailySelect = false;
+        state.playingDaily = false;
+      } else {
+        state.showingPackSelect = true;
+        state.showingLevelSelect = false;
+        state.showingDailySelect = false;
+        state.showingTutorials = false;
+        state.playingDaily = false;
+      }
       levelSelectPage = 0;
 
       // Input events
